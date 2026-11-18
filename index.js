@@ -6,7 +6,7 @@
 
 require('dotenv').config();
 
-// Global Process Crash Guards (Prevents Vercel 500 FUNCTION_INVOCATION_FAILED)
+// Global Process Crash Guards
 process.on('uncaughtException', (err) => {
   console.error('Process Uncaught Exception:', err.message);
 });
@@ -75,10 +75,7 @@ let cachedDb = null;
 async function connectDb() {
   if (mongoose.connection.readyState >= 1) return mongoose.connection;
   if (!cachedDb) {
-    if (!MONGODB_URI) {
-      console.warn('MONGODB_URI is not set in environment variables');
-      return null;
-    }
+    if (!MONGODB_URI) return null;
     mongoose.set('strictQuery', true);
     mongoose.set('autoIndex', false);
     cachedDb = mongoose.connect(MONGODB_URI, {
@@ -95,11 +92,7 @@ async function connectDb() {
 }
 
 app.use(async (req, res, next) => {
-  try {
-    await connectDb();
-  } catch (e) {
-    console.error('Middleware DB check:', e.message);
-  }
+  try { await connectDb(); } catch (e) { console.error('Middleware DB check:', e.message); }
   next();
 });
 
@@ -183,7 +176,6 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
-// Upload Document Endpoint
 app.post('/api/documents/upload', async (req, res) => {
   try {
     const { fileBase64, mimeType, fileName, fileSize, partyName } = req.body;
@@ -210,7 +202,6 @@ app.post('/api/documents/upload', async (req, res) => {
   }
 });
 
-// Organize / Move Document Endpoint
 app.post('/api/documents/:id/organize', async (req, res) => {
   try {
     const { businessId, fiscalYearId, categoryId, isUncategorized } = req.body;
@@ -236,7 +227,6 @@ app.post('/api/documents/:id/organize', async (req, res) => {
   }
 });
 
-// Password Protected View
 app.post('/api/documents/:id/view', async (req, res) => {
   try {
     const { password } = req.body;
@@ -386,9 +376,11 @@ app.get('/', (req, res) => {
     #statusToast.success { background: #10B981; }
     #statusToast.error { background: #EF4444; }
 
-    /* Uploading Spinner */
+    /* Uploading Spinner & Progress Bar */
     .spinner-ring { border: 4px solid #f3f3f3; border-top: 4px solid #007aff; border-radius: 50%; width: 44px; height: 44px; animation: spin 0.9s linear infinite; margin: 0 auto 14px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .progress-container { width: 100%; background: #e2e8f0; border-radius: 10px; margin-top: 15px; overflow: hidden; height: 8px; }
+    .progress-bar { height: 100%; background: #007aff; width: 0%; transition: width 0.2s; border-radius: 10px; }
   </style>
 </head>
 <body>
@@ -401,18 +393,14 @@ app.get('/', (req, res) => {
     </div>
   </header>
 
-  <!-- ACTIONS -->
   <div class="actions">
-    <!-- CAPTURE BUTTON (Label wrapper ensures native input click) -->
     <label class="btn-act btn-cap" style="position: relative;">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
-      <!-- capture="environment" opens the rear camera on mobile, file chooser on PC -->
       <input type="file" id="directCamInput" class="file-input-hidden" accept="image/*" capture="environment" onchange="handleIncomingFile(this)">
     </label>
 
-    <!-- UPLOAD BUTTON (Label wrapper ensures native input click) -->
     <label class="btn-act btn-up" style="position: relative;">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
@@ -421,20 +409,17 @@ app.get('/', (req, res) => {
     </label>
   </div>
 
-  <!-- DIRECTORY SECTION -->
   <div class="sec-header">
     <div class="sec-title">Directory / Businesses</div>
   </div>
   <div class="biz-grid" id="bizContainer"><div class="biz-card">Connecting to database...</div></div>
 
-  <!-- RECENT DOCUMENTS -->
   <div class="sec-header">
     <div class="sec-title">Recent Documents</div>
     <span style="font-size:0.8rem; color:var(--muted);"><i class="fa-solid fa-lock"></i> Protected View</span>
   </div>
   <div id="docsContainer"><div class="doc-item">Fetching documents...</div></div>
 
-  <!-- 1. WHATSAPP STYLE REVIEW PREVIEW MODAL -->
   <div id="whatsappPreviewModal">
     <div class="wa-top-bar">
       <div class="wa-top-left">
@@ -447,8 +432,6 @@ app.get('/', (req, res) => {
         <button class="wa-send-btn" onclick="executeUpload()">Send</button>
       </div>
     </div>
-
-    <!-- Scanner Filter Strip -->
     <div class="scan-strip" id="scanStrip">
       <button class="scan-opt-btn active" onclick="applyFilter('original')">Original</button>
       <button class="scan-opt-btn" onclick="applyFilter('enhance')">Auto-Scan</button>
@@ -457,8 +440,6 @@ app.get('/', (req, res) => {
       <button class="scan-opt-btn" onclick="applyFilter('bw')">High Contrast</button>
       <button class="scan-opt-btn" onclick="rotatePreview()"><i class="fa-solid fa-rotate-right"></i> Rotate</button>
     </div>
-
-    <!-- Center Preview Area -->
     <div class="wa-preview-area">
       <img id="waPreviewImg" src="" alt="Preview">
       <div id="pdfPreviewCard">
@@ -468,24 +449,24 @@ app.get('/', (req, res) => {
       </div>
       <canvas id="hiddenCanvas" style="display:none;"></canvas>
     </div>
-
-    <!-- Bottom Caption Bar -->
     <div class="wa-bottom-bar">
       <input type="text" id="waCaptionInput" class="wa-caption-input" placeholder="Add a caption / Party name..." autocomplete="off">
       <button class="wa-float-send" title="Upload" onclick="executeUpload()"><i class="fa-solid fa-paper-plane"></i></button>
     </div>
   </div>
 
-  <!-- 2. UPLOADING ANIMATION MODAL -->
+  <!-- UPLOADING MODAL with Progress Bar -->
   <div class="modal" id="uploadingModal">
     <div class="modal-box" style="text-align:center; padding:36px 24px;">
       <div class="spinner-ring"></div>
       <h3 style="font-weight:800; margin-bottom:6px;">Uploading Document</h3>
       <p style="font-size:0.85rem; color:var(--muted);">Compressing & saving to database...</p>
+      <div class="progress-container">
+        <div class="progress-bar" id="uploadProgressBar"></div>
+      </div>
     </div>
   </div>
 
-  <!-- 3. DESTINATION FOLDER MODAL ("MOVE HERE" OR "UNCATEGORIZED") -->
   <div class="modal" id="destinationModal">
     <div class="modal-box">
       <div style="text-align:center; margin-bottom:14px;">
@@ -495,32 +476,23 @@ app.get('/', (req, res) => {
         <h3 style="font-weight:800;">Upload Complete!</h3>
         <p style="font-size:0.82rem; color:var(--muted);">Choose destination folder or save as uncategorized.</p>
       </div>
-
-      <!-- Folder Navigation Tree Selection -->
       <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:18px; padding:16px; margin-bottom:16px;">
         <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-building"></i> Destination Business</label>
         <select id="destBiz" class="input" style="background:#fff;"></select>
-
         <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-calendar"></i> Nepal Fiscal Year</label>
         <select id="destFY" class="input" style="background:#fff;"></select>
-
         <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-folder"></i> Destination Directory Folder</label>
         <select id="destCat" class="input" style="background:#fff;"></select>
       </div>
-
-      <!-- Prominent "Move Here" Button -->
       <button class="btn-primary" onclick="confirmMoveToFolder()">
         <i class="fa-solid fa-folder-open"></i> Move Here
       </button>
-
-      <!-- Uncategorized Fallback Button -->
       <button class="btn-secondary" onclick="confirmKeepUncategorized()">
         <i class="fa-solid fa-inbox"></i> Save as Uncategorized
       </button>
     </div>
   </div>
 
-  <!-- PASSWORD PROMPT MODAL -->
   <div class="modal" id="pwdModal">
     <div class="modal-box">
       <div style="text-align:center; margin-bottom:12px;"><i class="fa-solid fa-lock" style="font-size:2.2rem; color:#007aff;"></i></div>
@@ -533,7 +505,6 @@ app.get('/', (req, res) => {
     </div>
   </div>
 
-  <!-- VIEWER MODAL -->
   <div class="modal" id="viewModal">
     <div class="modal-box" style="max-width:540px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
@@ -596,11 +567,9 @@ app.get('/', (req, res) => {
         currentRawBase64 = e.target.result;
         processedBase64 = e.target.result;
         openWhatsappPreview();
+        input.value = ''; // Reset AFTER loading the file into memory
       };
       reader.readAsDataURL(file);
-      
-      // Reset input value so you can pick the same file again later
-      input.value = '';
     }
 
     function openWhatsappPreview() {
@@ -706,38 +675,65 @@ app.get('/', (req, res) => {
     }
 
     async function executeUpload() {
-      if (!processedBase64) return;
+      if (!processedBase64) {
+        showToast('No file selected', 'error');
+        return;
+      }
 
       const caption = document.getElementById('waCaptionInput').value.trim();
 
       document.getElementById('whatsappPreviewModal').style.display = 'none';
       document.getElementById('uploadingModal').style.display = 'flex';
+      
+      // Reset progress bar
+      const progressBar = document.getElementById('uploadProgressBar');
+      progressBar.style.width = '0%';
 
       const uploadPayload = await getDownscaledPayload(processedBase64);
 
       try {
-        const res = await fetch('/api/documents/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fileBase64: uploadPayload,
-            mimeType: currentMimeType,
-            fileName: currentFileName,
-            fileSize: currentFileSize,
-            partyName: caption
-          })
-        });
+        // Use XMLHttpRequest to track actual upload progress
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/documents/upload', true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
 
-        const data = await res.json();
-        closeModal('uploadingModal');
+        // Track progress
+        xhr.upload.onprogress = function(event) {
+          if (event.lengthComputable) {
+            const percentComplete = (event.loaded / event.total) * 100;
+            progressBar.style.width = percentComplete + '%';
+          }
+        };
 
-        if (res.ok && data.success) {
-          latestUploadedDocId = data.document._id;
-          document.getElementById('destinationModal').style.display = 'flex';
-          loadData();
-        } else {
-          showToast('Upload error: ' + (data.error || 'Server error'), 'error');
-        }
+        xhr.onload = function() {
+          closeModal('uploadingModal');
+          if (xhr.status === 200) {
+            const data = JSON.parse(xhr.responseText);
+            if (data.success) {
+              latestUploadedDocId = data.document._id;
+              document.getElementById('destinationModal').style.display = 'flex';
+              loadData();
+            } else {
+              showToast('Upload error: ' + (data.error || 'Server error'), 'error');
+            }
+          } else {
+            showToast('Upload failed: Server error ' + xhr.status, 'error');
+          }
+        };
+
+        xhr.onerror = function() {
+          closeModal('uploadingModal');
+          showToast('Connection error during upload.', 'error');
+        };
+
+        xhr.send(JSON.stringify({
+          fileBase64: uploadPayload,
+          mimeType: currentMimeType,
+          fileName: currentFileName,
+          fileSize: currentFileSize,
+          partyName: caption
+        }));
+
       } catch (err) {
         closeModal('uploadingModal');
         showToast('Connection error: ' + err.message, 'error');
@@ -829,7 +825,6 @@ app.get('/', (req, res) => {
         const catArr = Array.isArray(categories) ? categories : [];
         const docArr = (docs && Array.isArray(docs.documents)) ? docs.documents : [];
 
-        // Directory
         if (bizArr.length > 0) {
           document.getElementById('bizContainer').innerHTML = bizArr.map(function(b) {
             return '<div class="biz-card">' +
@@ -854,7 +849,6 @@ app.get('/', (req, res) => {
           }).join('');
         }
 
-        // Recent Documents
         if (docArr.length > 0) {
           document.getElementById('docsContainer').innerHTML = docArr.map(function(d) {
             const iconClass = d.fileType === 'application/pdf' ? 'fa-file-pdf' : 'fa-file-lines';
