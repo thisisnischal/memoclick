@@ -1,0 +1,40 @@
+{
+  "name": "memoclick",
+  "version": "1.0.0",
+  "description": "MemoClick - Full-Stack Business Document Filing & Management System",
+  "main": "index.js",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "admin": "node admin.js"
+  },
+  "keywords": [
+    "document-management",
+    "nepal-fiscal-year",
+    "claymorphism",
+    "pwa",
+    "s3",
+    "google-drive-backup"
+  ],
+  "author": "MemoClick Engineering",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.750.0",
+    "@aws-sdk/s3-request-presigner": "^3.750.0",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "express-validator": "^7.2.1",
+    "googleapis": "^144.0.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.10.1",
+    "multer": "^1.4.5-lts.1",
+    "pdf-lib": "^1.17.9"
+  }
+}
