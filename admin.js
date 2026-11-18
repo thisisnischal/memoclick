@@ -104,7 +104,7 @@ function verifyAdmin(req, res, next) {
   }
 }
 
-// 1. Login
+// 1. Admin Login API
 app.post('/admin/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -157,7 +157,7 @@ app.get('/admin/api/file-manager', verifyAdmin, async (req, res) => {
   }
 });
 
-// 3. Delete Document from File Manager
+// 3. Delete Document
 app.delete('/admin/api/documents/:id', verifyAdmin, async (req, res) => {
   try {
     await Document.findByIdAndDelete(req.params.id);
@@ -233,7 +233,7 @@ app.post('/admin/api/view-password', verifyAdmin, async (req, res) => {
   }
 });
 
-// UI View
+// UI
 app.get('*', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!DOCTYPE html>
@@ -241,7 +241,7 @@ app.get('*', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MemoClick – Admin File Manager</title>
+  <title>MemoClick – Admin Console</title>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
@@ -257,12 +257,12 @@ app.get('*', (req, res) => {
     body { background: var(--bg); color: var(--text); padding: 20px; min-height: 100vh; }
     
     .nav-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .box { background: #fff; padding: 22px; border-radius: 20px; box-shadow: 0 4px 14px rgba(0,0,0,0.06); margin-bottom: 20px; }
-    .input { width: 100%; padding: 12px; margin: 6px 0 12px; border: 1px solid #d1d5db; border-radius: 12px; font-size: 0.95rem; outline: none; }
+    .box { background: #fff; padding: 24px; border-radius: 20px; box-shadow: 0 4px 14px rgba(0,0,0,0.06); margin-bottom: 20px; }
+    .input { width: 100%; padding: 13px; margin: 6px 0 12px; border: 1px solid #d1d5db; border-radius: 12px; font-size: 0.95rem; outline: none; }
     .btn { padding: 10px 18px; background: var(--primary); color: #fff; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
     .btn-danger { background: var(--danger); }
 
-    /* Breadcrumbs Bar */
+    /* Breadcrumbs */
     .breadcrumbs { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 700; padding: 12px 18px; background: #fff; border-radius: 14px; box-shadow: var(--clay-shadow); margin-bottom: 18px; flex-wrap: wrap; }
     .crumb-link { color: var(--primary); cursor: pointer; }
     .crumb-sep { color: var(--muted); }
@@ -275,16 +275,36 @@ app.get('*', (req, res) => {
     .fm-title { font-weight: 800; font-size: 0.95rem; word-break: break-word; }
     .fm-sub { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
 
-    /* Modal */
+    /* Modals */
     .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(4px); }
     .modal-box { background:#fff; padding:24px; border-radius:24px; width:92%; max-width:560px; max-height:90vh; overflow-y:auto; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
     .item-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f2f5; }
   </style>
 </head>
 <body>
-  <div style="max-width:960px; margin:0 auto;">
+
+  <!-- CLEAN ISOLATED LOGIN SCREEN (Nothing else shown before login) -->
+  <div id="loginScreen" style="min-height:80vh; display:flex; align-items:center; justify-content:center;">
+    <div class="box" style="width:100%; max-width:420px; margin:0 auto;">
+      <div style="text-align:center; margin-bottom:14px;">
+        <i class="fa-solid fa-shield-halved" style="font-size:2.4rem; color:var(--primary);"></i>
+      </div>
+      <h3 style="font-weight:800; text-align:center; margin-bottom:6px;">MemoClick Admin Sign In</h3>
+      <p style="font-size:0.85rem; color:var(--muted); text-align:center; margin-bottom:18px;">Sign in to open your filing directory & controls.</p>
+      
+      <input type="email" id="adminEmail" class="input" placeholder="Admin Email" autocomplete="off">
+      <input type="password" id="adminPassword" class="input" placeholder="Admin Password" autocomplete="off">
+      <button class="btn" style="width:100%; justify-content:center;" id="signInBtn" onclick="submitLogin()">Sign In</button>
+      <div id="loginMsg" style="color:red; font-size:0.85rem; margin-top:10px; font-weight:600; text-align:center;"></div>
+      <div style="text-align:center; margin-top:16px;">
+        <a href="/" style="font-size:0.82rem; color:var(--primary); text-decoration:none; font-weight:700;"><i class="fa-solid fa-arrow-left"></i> Return to Public App</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTHENTICATED FILE MANAGER APP (Only shown AFTER login) -->
+  <div id="authApp" style="display:none; max-width:960px; margin:0 auto;">
     
-    <!-- Top Header -->
     <div class="nav-bar">
       <div>
         <h3 style="font-weight:800;"><i class="fa-solid fa-folder-closed" style="color:var(--primary);"></i> MemoClick File Manager</h3>
@@ -296,28 +316,13 @@ app.get('*', (req, res) => {
       </div>
     </div>
 
-    <!-- LOGIN SCREEN -->
-    <div class="box" id="loginBox" style="max-width:440px; margin:40px auto;">
-      <h3 style="font-weight:800; margin-bottom:6px;">Admin Sign In</h3>
-      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:14px;">Sign in to view your file manager & document records.</p>
-      
-      <input type="email" id="adminEmail" class="input" placeholder="Admin Email" autocomplete="off">
-      <input type="password" id="adminPassword" class="input" placeholder="Admin Password" autocomplete="off">
-      <button class="btn" style="width:100%; justify-content:center;" id="signInBtn" onclick="submitLogin()">Sign In to Console</button>
-      <div id="loginMsg" style="color:red; font-size:0.85rem; margin-top:10px; font-weight:600; text-align:center;"></div>
+    <!-- Breadcrumb Bar -->
+    <div class="breadcrumbs" id="crumbBar">
+      <span class="crumb-link" onclick="navToRoot()"><i class="fa-solid fa-house"></i> Home</span>
     </div>
 
-    <!-- MAIN FILE MANAGER VIEW -->
-    <div id="fileManagerBox" style="display:none;">
-      
-      <!-- Interactive Breadcrumb -->
-      <div class="breadcrumbs" id="crumbBar">
-        <span class="crumb-link" onclick="navToRoot()"><i class="fa-solid fa-house"></i> Home</span>
-      </div>
-
-      <!-- Main Directory Grid -->
-      <div class="fm-grid" id="fmGrid">Loading file manager...</div>
-    </div>
+    <!-- Main File Manager Grid -->
+    <div class="fm-grid" id="fmGrid">Loading file manager...</div>
 
     <!-- SETTINGS MODAL -->
     <div class="modal" id="settingsModal">
@@ -327,7 +332,7 @@ app.get('*', (req, res) => {
           <button onclick="closeSettingsModal()" style="border:none; background:#eee; width:30px; height:30px; border-radius:50%; font-weight:800; cursor:pointer;">&times;</button>
         </div>
 
-        <!-- 1. View Password -->
+        <!-- View Password -->
         <div class="box" style="box-shadow:none; border:1px solid #e5e7eb; padding:16px; margin-bottom:16px;">
           <h4 style="font-weight:800; margin-bottom:4px;"><i class="fa-solid fa-key" style="color:var(--primary);"></i> Document View Password</h4>
           <p style="font-size:0.75rem; color:var(--muted); margin-bottom:10px;">Password required by visitors to inspect files.</p>
@@ -337,7 +342,7 @@ app.get('*', (req, res) => {
           </div>
         </div>
 
-        <!-- 2. Businesses -->
+        <!-- Businesses -->
         <div class="box" style="box-shadow:none; border:1px solid #e5e7eb; padding:16px; margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <h4 style="font-weight:800;"><i class="fa-solid fa-building"></i> Businesses</h4>
@@ -346,7 +351,7 @@ app.get('*', (req, res) => {
           <div id="bizList">Loading...</div>
         </div>
 
-        <!-- 3. Folders -->
+        <!-- Folders -->
         <div class="box" style="box-shadow:none; border:1px solid #e5e7eb; padding:16px; margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <h4 style="font-weight:800;"><i class="fa-solid fa-folder-tree"></i> Directory Folders</h4>
@@ -359,7 +364,7 @@ app.get('*', (req, res) => {
       </div>
     </div>
 
-    <!-- FILE PREVIEW MODAL -->
+    <!-- PREVIEW MODAL -->
     <div class="modal" id="adminPreviewModal">
       <div class="modal-box" style="max-width:600px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
@@ -379,8 +384,8 @@ app.get('*', (req, res) => {
     async function initFileManager() {
       const token = localStorage.getItem('mc_admin_token');
       if (!token) {
-        document.getElementById('loginBox').style.display = 'block';
-        document.getElementById('fileManagerBox').style.display = 'none';
+        document.getElementById('loginScreen').style.display = 'flex';
+        document.getElementById('authApp').style.display = 'none';
         return;
       }
 
@@ -391,8 +396,8 @@ app.get('*', (req, res) => {
         if (!res.ok) throw new Error();
         treeData = await res.json();
 
-        document.getElementById('loginBox').style.display = 'none';
-        document.getElementById('fileManagerBox').style.display = 'block';
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('authApp').style.display = 'block';
         renderCurrentLevel();
         populateSettingsLists();
       } catch (e) {
@@ -400,7 +405,6 @@ app.get('*', (req, res) => {
       }
     }
 
-    // Interactive File Manager Navigation
     function renderCurrentLevel() {
       const grid = document.getElementById('fmGrid');
       const crumb = document.getElementById('crumbBar');
@@ -416,7 +420,7 @@ app.get('*', (req, res) => {
               <div class="fm-sub">\${docCount} Documents</div>
             </div>
           \`;
-        }).join('') || '<div style="color:var(--muted);">No businesses found. Add one in Settings.</div>';
+        }).join('') || '<div style="color:var(--muted);">No businesses configured yet. Add one in Settings.</div>';
       } 
       else if (currentPath.level === 'biz') {
         crumb.innerHTML = \`
@@ -508,144 +512,4 @@ app.get('*', (req, res) => {
     }
 
     async function adminDeleteDoc(id) {
-      if (!confirm('Permanently delete this document from the filing system?')) return;
-      const token = localStorage.getItem('mc_admin_token');
-      await fetch('/admin/api/documents/' + id, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + token }
-      });
-      initFileManager();
-    }
-
-    // Settings Modal
-    function openSettingsModal() { document.getElementById('settingsModal').style.display = 'flex'; }
-    function closeSettingsModal() { document.getElementById('settingsModal').style.display = 'none'; }
-    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-
-    function populateSettingsLists() {
-      document.getElementById('curViewPass').value = treeData.currentViewPassword;
-      document.getElementById('bizList').innerHTML = treeData.businesses.map(b => \`
-        <div class="item-row">
-          <div><strong>\${b.businessName}</strong></div>
-          <div style="display:flex; gap:6px;">
-            <button class="btn" style="padding:4px 8px; font-size:0.75rem;" onclick="renameBiz('\${b._id}', '\${b.businessName}')">Rename</button>
-            <button class="btn btn-danger" style="padding:4px 8px; font-size:0.75rem;" onclick="deleteBiz('\${b._id}')"><i class="fa-solid fa-trash"></i></button>
-          </div>
-        </div>
-      \`).join('');
-
-      document.getElementById('catList').innerHTML = treeData.categories.map(c => \`
-        <div class="item-row">
-          <div><i class="fa-solid fa-folder" style="color:var(--primary); margin-right:6px;"></i><strong>\${c.name}</strong></div>
-          <button class="btn btn-danger" style="padding:4px 8px; font-size:0.75rem;" onclick="deleteCat('\${c._id}')"><i class="fa-solid fa-trash"></i></button>
-        </div>
-      \`).join('');
-    }
-
-    async function submitLogin() {
-      const email = document.getElementById('adminEmail').value.trim();
-      const password = document.getElementById('adminPassword').value.trim();
-      const msg = document.getElementById('loginMsg');
-      const btn = document.getElementById('signInBtn');
-
-      if (!email || !password) return msg.innerText = 'Enter email and password';
-      msg.innerText = 'Verifying...';
-      btn.disabled = true;
-
-      try {
-        const res = await fetch('/admin/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
-        });
-        const data = await res.json();
-        if (res.ok && data.token) {
-          localStorage.setItem('mc_admin_token', data.token);
-          msg.innerText = '';
-          initFileManager();
-        } else {
-          msg.innerText = data.error || 'Incorrect email or password';
-        }
-      } catch (err) {
-        msg.innerText = 'Connection error';
-      } finally {
-        btn.disabled = false;
-      }
-    }
-
-    async function saveViewPassword() {
-      const password = document.getElementById('curViewPass').value;
-      const token = localStorage.getItem('mc_admin_token');
-      await fetch('/admin/api/view-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ password })
-      });
-      alert('View password updated!');
-      initFileManager();
-    }
-
-    async function openAddBizPrompt() {
-      const name = prompt('Business Name:');
-      if (!name) return;
-      const token = localStorage.getItem('mc_admin_token');
-      await fetch('/admin/api/businesses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ businessName: name })
-      });
-      initFileManager();
-    }
-
-    async function renameBiz(id, oldName) {
-      const name = prompt('Rename Business:', oldName);
-      if (!name) return;
-      const token = localStorage.getItem('mc_admin_token');
-      await fetch('/admin/api/businesses/' + id, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ businessName: name })
-      });
-      initFileManager();
-    }
-
-    async function deleteBiz(id) {
-      if (!confirm('Delete this business?')) return;
-      const token = localStorage.getItem('mc_admin_token');
-      await fetch('/admin/api/businesses/' + id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
-      initFileManager();
-    }
-
-    async function openAddCatPrompt() {
-      const name = prompt('New Folder Name:');
-      if (!name) return;
-      const token = localStorage.getItem('mc_admin_token');
-      await fetch('/admin/api/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ name })
-      });
-      initFileManager();
-    }
-
-    async function deleteCat(id) {
-      if (!confirm('Delete this folder?')) return;
-      const token = localStorage.getItem('mc_admin_token');
-      await fetch('/admin/api/categories/' + id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
-      initFileManager();
-    }
-
-    function adminLogout() {
-      localStorage.removeItem('mc_admin_token');
-      document.getElementById('loginBox').style.display = 'block';
-      document.getElementById('fileManagerBox').style.display = 'none';
-      closeSettingsModal();
-    }
-
-    window.addEventListener('DOMContentLoaded', initFileManager);
-  </script>
-</body>
-</html>`);
-});
-
-module.exports = app;
+      if (!confirm('Permanently delete this document from filing system?')) return;
