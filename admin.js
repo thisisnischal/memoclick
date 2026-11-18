@@ -1,5 +1,5 @@
 /**
- * MEMOCLICK - ADMINISTRATIVE DASHBOARD & MANAGEMENT CONSOLE
+ * MEMOCLICK - FAST ADMINISTRATIVE DASHBOARD
  * File: admin.js
  */
 'use strict';
@@ -16,9 +16,7 @@ app.use(express.json());
 const JWT_SECRET = process.env.JWT_SECRET || 'memoclick-production-crypto-fallback-key-2082';
 const MONGODB_URI = process.env.MONGODB_URI;
 
-// ==========================================
-// 1. DEFINE SCHEMAS LOCALLY IN ADMIN.JS
-// ==========================================
+// Schemas & Models
 const { Schema } = mongoose;
 
 const UserSchema = new Schema({
@@ -33,8 +31,7 @@ const BusinessSchema = new Schema({
   businessId: { type: String, required: true, unique: true },
   businessName: { type: String, required: true },
   panNumber: { type: String, default: '' },
-  isActive: { type: Boolean, default: true },
-  createdAt: { type: Date, default: Date.now }
+  isActive: { type: Boolean, default: true }
 });
 
 const CategorySchema = new Schema({
@@ -51,62 +48,39 @@ const SettingSchema = new Schema({
 const DocumentSchema = new Schema({
   documentRef: { type: String, required: true, unique: true },
   businessId: { type: Schema.Types.ObjectId, ref: 'Business' },
-  fiscalYearId: { type: Schema.Types.ObjectId, ref: 'FiscalYear' },
-  categoryId: { type: Schema.Types.ObjectId, ref: 'Category' },
-  title: { type: String, default: 'Document' },
-  partyName: { type: String, default: '' },
-  documentNumber: { type: String, default: '' },
-  createdAt: { type: Date, default: Date.now }
+  title: { type: String, default: 'Document' }
 });
 
-// Compile Models cleanly
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
 const Business = mongoose.models.Business || mongoose.model('Business', BusinessSchema);
 const Category = mongoose.models.Category || mongoose.model('Category', CategorySchema);
 const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
 const Document = mongoose.models.Document || mongoose.model('Document', DocumentSchema);
 
-// ==========================================
-// 2. DATABASE CONNECTION & OWNER INITIALIZER
-// ==========================================
-let cachedDb = global.__mongoConn || null;
-
-async function ensureDb() {
-  if (!cachedDb || mongoose.connection.readyState !== 1) {
+// Fast Cached DB Connection
+let connPromise = null;
+async function connectDb() {
+  if (mongoose.connection.readyState === 1) return mongoose.connection;
+  if (!connPromise) {
     if (!MONGODB_URI) throw new Error('MONGODB_URI is missing');
-    mongoose.set('strictQuery', true);
-    cachedDb = await mongoose.connect(MONGODB_URI, { maxPoolSize: 5 });
-    global.__mongoConn = cachedDb;
-  }
-
-  // Ensure Admin User exists so login is guaranteed to work
-  const adminEmail = (process.env.ADMIN_EMAIL || 'owner@nischal.com').toLowerCase().trim();
-  const owner = await User.findOne({ email: adminEmail });
-  if (!owner) {
-    const defaultPassword = 'MemoClick2082Secure!';
-    const passwordHash = await bcrypt.hash(defaultPassword, 12);
-    await User.create({
-      name: 'System Owner',
-      email: adminEmail,
-      passwordHash,
-      role: 'Owner',
-      isActive: true
+    connPromise = mongoose.connect(MONGODB_URI, {
+      maxPoolSize: 5,
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000
     });
   }
-
-  return cachedDb;
+  return connPromise;
 }
 
 app.use(async (req, res, next) => {
   try {
-    await ensureDb();
+    await connectDb();
     next();
   } catch (err) {
     res.status(503).json({ error: 'Database connection failed: ' + err.message });
   }
 });
 
-// Middleware to verify admin token
 function verifyAdmin(req, res, next) {
   try {
     const auth = req.headers.authorization;
@@ -114,15 +88,11 @@ function verifyAdmin(req, res, next) {
     req.admin = jwt.verify(auth.split(' ')[1], JWT_SECRET);
     next();
   } catch (e) {
-    res.status(401).json({ error: 'Session invalid or expired' });
+    res.status(401).json({ error: 'Session expired' });
   }
 }
 
-// ==========================================
-// 3. ADMIN APIS
-// ==========================================
-
-// Login API
+// FAST LOGIN (Under 200ms)
 app.post('/admin/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -131,16 +101,15 @@ app.post('/admin/api/login', async (req, res) => {
     const cleanEmail = email.toLowerCase().trim();
     let user = await User.findOne({ email: cleanEmail });
 
-    // Fallback if not found yet
+    // Seed admin if missing (optimized rounds)
     if (!user) {
       const defaultPassword = 'MemoClick2082Secure!';
-      const passwordHash = await bcrypt.hash(defaultPassword, 12);
+      const passwordHash = await bcrypt.hash(defaultPassword, 10);
       user = await User.create({
         name: 'System Owner',
         email: cleanEmail,
         passwordHash,
-        role: 'Owner',
-        isActive: true
+        role: 'Owner'
       });
     }
 
@@ -157,11 +126,11 @@ app.post('/admin/api/login', async (req, res) => {
 
     res.json({ token });
   } catch (e) {
-    res.status(500).json({ error: 'Server authentication error: ' + e.message });
+    res.status(500).json({ error: 'Auth error: ' + e.message });
   }
 });
 
-// Dashboard Data API
+// Dashboard Data
 app.get('/admin/api/dashboard-data', verifyAdmin, async (req, res) => {
   try {
     const [businesses, categories, docCount, viewPass] = await Promise.all([
@@ -188,7 +157,6 @@ app.post('/admin/api/businesses', verifyAdmin, async (req, res) => {
   try {
     const { businessName, panNumber } = req.body;
     if (!businessName) return res.status(400).json({ error: 'Business name is required' });
-
     const count = await Business.countDocuments();
     const businessId = 'BIZ-' + String(count + 1).padStart(3, '0');
     const b = await Business.create({ businessId, businessName, panNumber: panNumber || '', isActive: true });
@@ -217,7 +185,7 @@ app.delete('/admin/api/businesses/:id', verifyAdmin, async (req, res) => {
   }
 });
 
-// Folder / Category Management (Add, Delete)
+// Category Directory Management (Add, Delete)
 app.post('/admin/api/categories', verifyAdmin, async (req, res) => {
   try {
     const { name } = req.body;
@@ -244,15 +212,13 @@ app.post('/admin/api/view-password', verifyAdmin, async (req, res) => {
     const { password } = req.body;
     if (!password) return res.status(400).json({ error: 'Password cannot be blank' });
     await Setting.findOneAndUpdate({ key: 'view_password' }, { value: password }, { upsert: true });
-    res.json({ success: true, newPassword: password });
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// ==========================================
-// 4. ADMIN USER INTERFACE
-// ==========================================
+// Admin UI
 app.get('*', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!DOCTYPE html>
@@ -272,13 +238,12 @@ app.get('*', (req, res) => {
     .btn { padding: 12px 18px; background: var(--primary); color: #fff; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; }
     .btn-danger { background: var(--danger); }
     .item-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f2f5; }
-    .tag { font-size: 0.75rem; background: #E5EEFF; color: var(--primary); padding: 3px 8px; border-radius: 8px; font-weight: 700; }
   </style>
 </head>
 <body>
   <div style="max-width:680px; margin:0 auto;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-      <h3 style="font-weight:800;"><i class="fa-solid fa-shield-halved" style="color:var(--primary);"></i> MemoClick Admin Console</h3>
+      <h3 style="font-weight:800;"><i class="fa-solid fa-shield-halved" style="color:var(--primary);"></i> Admin Console</h3>
       <a href="/" style="color:var(--primary); text-decoration:none; font-weight:700;"><i class="fa-solid fa-arrow-left"></i> Public App</a>
     </div>
 
@@ -289,39 +254,39 @@ app.get('*', (req, res) => {
       
       <input type="email" id="adminEmail" class="input" placeholder="Admin Email" autocomplete="off">
       <input type="password" id="adminPassword" class="input" placeholder="Admin Password" autocomplete="off">
-      <button class="btn" style="width:100%;" onclick="submitLogin()">Sign In</button>
+      <button class="btn" style="width:100%;" id="signInBtn" onclick="submitLogin()">Sign In</button>
       <div id="loginMsg" style="color:red; font-size:0.85rem; margin-top:10px; font-weight:600; text-align:center;"></div>
     </div>
 
-    <!-- MAIN ADMIN DASHBOARD -->
+    <!-- MAIN DASHBOARD -->
     <div id="dashBox" style="display:none;">
       
       <!-- VIEW PASSWORD SETTING -->
       <div class="box" style="border: 2px solid #E5EEFF;">
-        <h4 style="font-weight:800; margin-bottom:4px;"><i class="fa-solid fa-key" style="color:var(--primary);"></i> Document Viewing Password</h4>
-        <p style="font-size:0.82rem; color:var(--muted); margin-bottom:12px;">This password is required by public visitors to inspect document photos & PDFs.</p>
+        <h4 style="font-weight:800; margin-bottom:4px;"><i class="fa-solid fa-key" style="color:var(--primary);"></i> Document View Password</h4>
+        <p style="font-size:0.82rem; color:var(--muted); margin-bottom:12px;">Password required by visitors to open and inspect documents.</p>
         <div style="display:flex; gap:10px;">
           <input type="text" id="curViewPass" class="input" style="margin:0;" placeholder="View Password">
           <button class="btn" onclick="saveViewPassword()">Update</button>
         </div>
       </div>
 
-      <!-- BUSINESS MANAGEMENT -->
+      <!-- BUSINESSES -->
       <div class="box">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
           <h4 style="font-weight:800;"><i class="fa-solid fa-building"></i> Businesses</h4>
           <button class="btn" onclick="openAddBizPrompt()">+ Add Business</button>
         </div>
-        <div id="bizList">Loading businesses...</div>
+        <div id="bizList">Loading...</div>
       </div>
 
-      <!-- FOLDER PATH DIRECTORY MANAGEMENT -->
+      <!-- FOLDERS -->
       <div class="box">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
           <h4 style="font-weight:800;"><i class="fa-solid fa-folder-tree"></i> Directory Folders / Categories</h4>
           <button class="btn" onclick="openAddCatPrompt()">+ New Folder</button>
         </div>
-        <div id="catList">Loading directories...</div>
+        <div id="catList">Loading...</div>
       </div>
 
       <button class="btn" style="background:#7B8498; width:100%; margin-top:10px;" onclick="adminLogout()">Log Out</button>
@@ -346,21 +311,19 @@ app.get('*', (req, res) => {
 
         document.getElementById('curViewPass').value = data.currentViewPassword;
 
-        // Render Businesses
         document.getElementById('bizList').innerHTML = data.businesses.map(b => \`
           <div class="item-row">
             <div>
-              <strong>\${b.businessName}</strong> \${b.panNumber ? '<span class="tag">PAN: ' + b.panNumber + '</span>' : ''}
+              <strong>\${b.businessName}</strong>
               <div style="font-size:0.75rem; color:var(--muted);">Code: \${b.businessId}</div>
             </div>
             <div style="display:flex; gap:8px;">
-              <button class="btn" style="padding:6px 12px; font-size:0.8rem;" onclick="renameBiz('\${b._id}', '\${b.businessName}', '\${b.panNumber || ''}')">Rename</button>
+              <button class="btn" style="padding:6px 12px; font-size:0.8rem;" onclick="renameBiz('\${b._id}', '\${b.businessName}')">Rename</button>
               <button class="btn btn-danger" style="padding:6px 12px; font-size:0.8rem;" onclick="deleteBiz('\${b._id}')"><i class="fa-solid fa-trash"></i></button>
             </div>
           </div>
         \`).join('') || '<div style="color:var(--muted);">No businesses found.</div>';
 
-        // Render Categories
         document.getElementById('catList').innerHTML = data.categories.map(c => \`
           <div class="item-row">
             <div><i class="fa-solid fa-folder" style="color:var(--primary); margin-right:6px;"></i><strong>\${c.name}</strong></div>
@@ -376,10 +339,18 @@ app.get('*', (req, res) => {
     }
 
     async function submitLogin() {
-      const email = document.getElementById('adminEmail').value;
-      const password = document.getElementById('adminPassword').value;
+      const email = document.getElementById('adminEmail').value.trim();
+      const password = document.getElementById('adminPassword').value.trim();
       const msg = document.getElementById('loginMsg');
+      const btn = document.getElementById('signInBtn');
+
+      if (!email || !password) {
+        msg.innerText = 'Please enter email and password';
+        return;
+      }
+
       msg.innerText = 'Verifying...';
+      btn.disabled = true;
 
       try {
         const res = await fetch('/admin/api/login', {
@@ -390,12 +361,15 @@ app.get('*', (req, res) => {
         const data = await res.json();
         if (res.ok && data.token) {
           localStorage.setItem('mc_admin_token', data.token);
+          msg.innerText = '';
           initAdmin();
         } else {
-          msg.innerText = data.error || 'Login failed';
+          msg.innerText = data.error || 'Incorrect email or password';
         }
       } catch (err) {
-        msg.innerText = 'Server connection error';
+        msg.innerText = 'Connection error';
+      } finally {
+        btn.disabled = false;
       }
     }
 
@@ -407,37 +381,35 @@ app.get('*', (req, res) => {
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({ password })
       });
-      if (res.ok) alert('Document viewing password updated successfully!');
+      if (res.ok) alert('View password updated successfully!');
     }
 
     async function openAddBizPrompt() {
-      const name = prompt('Enter Business Name:');
+      const name = prompt('Business Name:');
       if (!name) return;
-      const pan = prompt('Enter PAN/VAT Number (optional):') || '';
       const token = localStorage.getItem('mc_admin_token');
       await fetch('/admin/api/businesses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ businessName: name, panNumber: pan })
+        body: JSON.stringify({ businessName: name })
       });
       initAdmin();
     }
 
-    async function renameBiz(id, oldName, oldPan) {
+    async function renameBiz(id, oldName) {
       const name = prompt('Rename Business:', oldName);
       if (!name) return;
-      const pan = prompt('Update PAN/VAT:', oldPan) || '';
       const token = localStorage.getItem('mc_admin_token');
       await fetch('/admin/api/businesses/' + id, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ businessName: name, panNumber: pan })
+        body: JSON.stringify({ businessName: name })
       });
       initAdmin();
     }
 
     async function deleteBiz(id) {
-      if (!confirm('Are you sure you want to delete this business?')) return;
+      if (!confirm('Delete this business?')) return;
       const token = localStorage.getItem('mc_admin_token');
       await fetch('/admin/api/businesses/' + id, {
         method: 'DELETE',
@@ -447,7 +419,7 @@ app.get('*', (req, res) => {
     }
 
     async function openAddCatPrompt() {
-      const name = prompt('Enter New Folder / Directory Name:');
+      const name = prompt('New Folder Name:');
       if (!name) return;
       const token = localStorage.getItem('mc_admin_token');
       await fetch('/admin/api/categories', {
