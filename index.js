@@ -6,7 +6,6 @@
 
 require('dotenv').config();
 
-// Global Process Crash Guards
 process.on('uncaughtException', (err) => {
   console.error('Process Uncaught Exception:', err.message);
 });
@@ -23,7 +22,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 
-// Schemas & Models
 const { Schema } = mongoose;
 
 const BusinessSchema = new Schema({
@@ -70,7 +68,6 @@ const Category = mongoose.models.Category || mongoose.model('Category', Category
 const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
 const Document = mongoose.models.Document || mongoose.model('Document', DocumentSchema);
 
-// Safe Mongoose Connection Cache
 let cachedDb = null;
 async function connectDb() {
   if (mongoose.connection.readyState >= 1) return mongoose.connection;
@@ -111,7 +108,6 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// APIs
 app.get('/api/businesses', async (req, res) => {
   try {
     let list = await Business.find({ isActive: true });
@@ -257,7 +253,6 @@ app.post('/api/documents/:id/view', async (req, res) => {
   }
 });
 
-// UI
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!DOCTYPE html>
@@ -285,27 +280,9 @@ app.get('/', (req, res) => {
     .brand { font-size: 1.4rem; font-weight: 800; color: #668EF0; display: flex; align-items: center; gap: 8px; }
     .icon-bubble { width: 42px; height: 42px; border-radius: 50%; background: #fff; box-shadow: var(--clay-shadow); display: flex; align-items: center; justify-content: center; color: #668EF0; text-decoration: none; font-size: 1.15rem; cursor: pointer; }
 
-    /* Action Buttons & Label hack */
+    /* Action Buttons */
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
-    
-    .btn-act { 
-      padding: 22px; 
-      border-radius: 26px; 
-      color: #fff; 
-      text-align: center; 
-      cursor: pointer; 
-      font-weight: 800; 
-      font-size: 1.15rem; 
-      display: flex; 
-      flex-direction: column; 
-      align-items: center; 
-      justify-content: center; 
-      gap: 8px; 
-      user-select: none; 
-      border: none; 
-      outline: none; 
-    }
-    
+    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; position: relative; overflow: hidden; }
     .btn-cap { background: linear-gradient(135deg, #668EF0, #426fe4); box-shadow: 0 10px 20px rgba(102,142,240,0.3); }
     .btn-up { background: linear-gradient(135deg, #43C6AC, #2BB594); box-shadow: 0 10px 20px rgba(43,181,148,0.3); }
     .btn-act span.sub { font-size: 0.78rem; font-weight: 500; opacity: 0.9; }
@@ -339,31 +316,27 @@ app.get('/', (req, res) => {
     .btn-primary { width:100%; padding:15px; background:#007aff; color:#fff; border:none; border-radius:14px; font-weight:800; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; gap:8px; }
     .btn-secondary { width:100%; padding:13px; background:#f1f5f9; color:var(--text); border:none; border-radius:14px; font-weight:700; cursor:pointer; font-size:0.95rem; margin-top:8px; }
 
-    /* WHATSAPP-STYLE MEDIA PREVIEW */
+    /* PREVIEW MODAL */
     #whatsappPreviewModal { display:none; position:fixed; inset:0; background:#0b141a; z-index:10001; flex-direction:column; justify-content:space-between; }
     .wa-top-bar { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; background:rgba(11,20,26,0.95); color:#e9edef; }
     .wa-top-left { display:flex; align-items:center; gap:12px; font-weight:700; font-size:1.1rem; }
-    .wa-top-actions { display:flex; align-items:center; gap:20px; }
     .wa-icon-btn { font-size:1.25rem; cursor:pointer; color:#e9edef; border:none; background:none; }
-    .wa-crop-btn { color:#ff6b22; font-size:1.35rem; }
-    .wa-trash-btn { color:#ff3b30; font-size:1.35rem; }
-    .wa-send-btn { color:#007aff; font-weight:800; font-size:1.05rem; cursor:pointer; background:none; border:none; }
     
     .wa-preview-area { flex:1; display:flex; align-items:center; justify-content:center; padding:10px; overflow:hidden; }
-    #waPreviewImg { max-width:100%; max-height:68vh; object-fit:contain; border-radius:8px; }
+    #waPreviewImg { max-width:100%; max-height:60vh; object-fit:contain; border-radius:8px; }
 
     /* PDF Badge Preview */
     #pdfPreviewCard { display:none; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center; padding:20px; }
     .pdf-big-icon { font-size:4rem; color:#ff3b30; margin-bottom:12px; }
 
+    /* Filter strip for images */
+    .scan-strip { display:flex; background:#202c33; padding:12px 14px; gap:10px; overflow-x:auto; justify-content:center; border-top: 1px solid #334149; border-bottom: 1px solid #334149;}
+    .scan-opt-btn { padding:8px 16px; border-radius:20px; font-size:0.85rem; font-weight:700; background:#374248; color:#fff; border:none; cursor:pointer; white-space:nowrap; transition: 0.2s; }
+    .scan-opt-btn.active { background:#007aff; box-shadow: 0 0 10px rgba(0,122,255,0.4); }
+
     .wa-bottom-bar { padding:14px 18px; background:rgba(11,20,26,0.95); display:flex; gap:10px; align-items:center; }
     .wa-caption-input { flex:1; padding:12px 18px; border-radius:24px; border:1px solid #374248; background:#202c33; color:#fff; font-size:0.95rem; outline:none; }
-    .wa-float-send { width:46px; height:46px; border-radius:50%; background:#007aff; color:#fff; border:none; display:flex; align-items:center; justify-content:center; font-size:1.15rem; cursor:pointer; flex-shrink:0; }
-
-    /* Crop / Scanner Toggle Strip */
-    .scan-strip { display:none; background:#202c33; padding:10px 14px; gap:8px; overflow-x:auto; }
-    .scan-opt-btn { padding:6px 14px; border-radius:12px; font-size:0.75rem; font-weight:700; background:#374248; color:#fff; border:none; cursor:pointer; white-space:nowrap; }
-    .scan-opt-btn.active { background:#007aff; }
+    .wa-float-send { width:100%; padding:16px; border-radius:14px; background:#007aff; color:#fff; border:none; font-weight:800; font-size:1rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
 
     /* Toast */
     #statusToast {
@@ -393,15 +366,16 @@ app.get('/', (req, res) => {
     </div>
   </header>
 
+  <!-- ACTIONS -->
   <div class="actions">
-    <label class="btn-act btn-cap" style="position: relative;">
+    <label class="btn-act btn-cap">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
       <input type="file" id="directCamInput" class="file-input-hidden" accept="image/*" capture="environment" onchange="handleIncomingFile(this)">
     </label>
 
-    <label class="btn-act btn-up" style="position: relative;">
+    <label class="btn-act btn-up">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
       <span class="sub">Gallery & PDFs</span>
@@ -409,37 +383,32 @@ app.get('/', (req, res) => {
     </label>
   </div>
 
+  <!-- DIRECTORY SECTION -->
   <div class="sec-header">
     <div class="sec-title">Directory / Businesses</div>
   </div>
   <div class="biz-grid" id="bizContainer"><div class="biz-card">Connecting to database...</div></div>
 
+  <!-- RECENT DOCUMENTS -->
   <div class="sec-header">
     <div class="sec-title">Recent Documents</div>
     <span style="font-size:0.8rem; color:var(--muted);"><i class="fa-solid fa-lock"></i> Protected View</span>
   </div>
   <div id="docsContainer"><div class="doc-item">Fetching documents...</div></div>
 
+  <!-- 1. PREVIEW MODAL -->
   <div id="whatsappPreviewModal">
     <div class="wa-top-bar">
       <div class="wa-top-left">
         <i class="fa-regular fa-image" style="font-size:1.3rem;"></i>
-        <span>Image preview</span>
+        <span>Review & Upload</span>
       </div>
       <div class="wa-top-actions">
-        <button class="wa-icon-btn wa-crop-btn" title="Crop & Scan Options" onclick="toggleScanStrip()"><i class="fa-solid fa-crop-simple"></i></button>
-        <button class="wa-icon-btn wa-trash-btn" title="Discard" onclick="discardPreview()"><i class="fa-regular fa-trash-can"></i></button>
-        <button class="wa-send-btn" onclick="executeUpload()">Send</button>
+        <button class="wa-icon-btn" title="Discard" onclick="discardPreview()"><i class="fa-regular fa-trash-can"></i> Cancel</button>
       </div>
     </div>
-    <div class="scan-strip" id="scanStrip">
-      <button class="scan-opt-btn active" onclick="applyFilter('original')">Original</button>
-      <button class="scan-opt-btn" onclick="applyFilter('enhance')">Auto-Scan</button>
-      <button class="scan-opt-btn" onclick="applyFilter('crop')">Crop Border</button>
-      <button class="scan-opt-btn" onclick="applyFilter('grayscale')">Grayscale</button>
-      <button class="scan-opt-btn" onclick="applyFilter('bw')">High Contrast</button>
-      <button class="scan-opt-btn" onclick="rotatePreview()"><i class="fa-solid fa-rotate-right"></i> Rotate</button>
-    </div>
+
+    <!-- Center Preview Area -->
     <div class="wa-preview-area">
       <img id="waPreviewImg" src="" alt="Preview">
       <div id="pdfPreviewCard">
@@ -449,13 +418,24 @@ app.get('/', (req, res) => {
       </div>
       <canvas id="hiddenCanvas" style="display:none;"></canvas>
     </div>
-    <div class="wa-bottom-bar">
-      <input type="text" id="waCaptionInput" class="wa-caption-input" placeholder="Add a caption / Party name..." autocomplete="off">
-      <button class="wa-float-send" title="Upload" onclick="executeUpload()"><i class="fa-solid fa-paper-plane"></i></button>
+
+    <!-- Scanner Filter Strip (Hidden for PDFs) -->
+    <div class="scan-strip" id="scanStrip">
+      <button class="scan-opt-btn active" onclick="applyFilter('original')">Keep Original</button>
+      <button class="scan-opt-btn" onclick="applyFilter('enhance')">Auto-Scan</button>
+      <button class="scan-opt-btn" onclick="applyFilter('crop')">Crop Border</button>
+    </div>
+
+    <!-- Bottom Caption Bar & Upload Button -->
+    <div class="wa-bottom-bar" style="flex-direction: column; gap: 12px; padding-bottom: 24px;">
+      <input type="text" id="waCaptionInput" class="wa-caption-input" placeholder="Add a caption / Party name..." autocomplete="off" style="width: 100%;">
+      <button class="wa-float-send" onclick="executeUpload()">
+        <i class="fa-solid fa-cloud-arrow-up"></i> Upload Document
+      </button>
     </div>
   </div>
 
-  <!-- UPLOADING MODAL with Progress Bar -->
+  <!-- 2. UPLOADING ANIMATION MODAL -->
   <div class="modal" id="uploadingModal">
     <div class="modal-box" style="text-align:center; padding:36px 24px;">
       <div class="spinner-ring"></div>
@@ -467,6 +447,7 @@ app.get('/', (req, res) => {
     </div>
   </div>
 
+  <!-- 3. DESTINATION FOLDER MODAL -->
   <div class="modal" id="destinationModal">
     <div class="modal-box">
       <div style="text-align:center; margin-bottom:14px;">
@@ -476,14 +457,18 @@ app.get('/', (req, res) => {
         <h3 style="font-weight:800;">Upload Complete!</h3>
         <p style="font-size:0.82rem; color:var(--muted);">Choose destination folder or save as uncategorized.</p>
       </div>
+
       <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:18px; padding:16px; margin-bottom:16px;">
         <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-building"></i> Destination Business</label>
         <select id="destBiz" class="input" style="background:#fff;"></select>
+
         <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-calendar"></i> Nepal Fiscal Year</label>
         <select id="destFY" class="input" style="background:#fff;"></select>
+
         <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-folder"></i> Destination Directory Folder</label>
         <select id="destCat" class="input" style="background:#fff;"></select>
       </div>
+
       <button class="btn-primary" onclick="confirmMoveToFolder()">
         <i class="fa-solid fa-folder-open"></i> Move Here
       </button>
@@ -493,6 +478,7 @@ app.get('/', (req, res) => {
     </div>
   </div>
 
+  <!-- PASSWORD PROMPT MODAL -->
   <div class="modal" id="pwdModal">
     <div class="modal-box">
       <div style="text-align:center; margin-bottom:12px;"><i class="fa-solid fa-lock" style="font-size:2.2rem; color:#007aff;"></i></div>
@@ -505,6 +491,7 @@ app.get('/', (req, res) => {
     </div>
   </div>
 
+  <!-- VIEWER MODAL -->
   <div class="modal" id="viewModal">
     <div class="modal-box" style="max-width:540px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
@@ -524,7 +511,6 @@ app.get('/', (req, res) => {
     let currentMimeType = 'image/jpeg';
     let currentFileName = 'document';
     let currentFileSize = '0 KB';
-    let currentRotation = 0;
     let activeFilter = 'original';
     let latestUploadedDocId = null;
     let selectedDocIdToView = null;
@@ -566,36 +552,33 @@ app.get('/', (req, res) => {
       reader.onload = function(e) {
         currentRawBase64 = e.target.result;
         processedBase64 = e.target.result;
-        openWhatsappPreview();
-        input.value = ''; // Reset AFTER loading the file into memory
+        openPreviewModal();
+        input.value = ''; 
       };
       reader.readAsDataURL(file);
     }
 
-    function openWhatsappPreview() {
-      currentRotation = 0;
+    function openPreviewModal() {
       activeFilter = 'original';
+      document.querySelectorAll('.scan-opt-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector('.scan-opt-btn').classList.add('active');
+      
       document.getElementById('waCaptionInput').value = '';
-      document.getElementById('scanStrip').style.display = 'none';
 
       if (currentMimeType.startsWith('image/')) {
         document.getElementById('waPreviewImg').src = processedBase64;
         document.getElementById('waPreviewImg').style.display = 'block';
         document.getElementById('pdfPreviewCard').style.display = 'none';
+        document.getElementById('scanStrip').style.display = 'flex';
       } else {
         document.getElementById('waPreviewImg').style.display = 'none';
         document.getElementById('pdfPreviewCard').style.display = 'flex';
         document.getElementById('pdfFileName').innerText = currentFileName;
         document.getElementById('pdfFileSize').innerText = currentFileSize;
+        document.getElementById('scanStrip').style.display = 'none'; // Hide for PDF
       }
 
       document.getElementById('whatsappPreviewModal').style.display = 'flex';
-    }
-
-    function toggleScanStrip() {
-      if (!currentMimeType.startsWith('image/')) return;
-      const strip = document.getElementById('scanStrip');
-      strip.style.display = strip.style.display === 'flex' ? 'none' : 'flex';
     }
 
     function discardPreview() {
@@ -611,12 +594,9 @@ app.get('/', (req, res) => {
       renderProcessedImage();
     }
 
-    function rotatePreview() {
-      currentRotation = (currentRotation + 90) % 360;
-      renderProcessedImage();
-    }
-
     function renderProcessedImage() {
+      if (!currentRawBase64) return;
+      
       const img = new Image();
       img.onload = function() {
         const canvas = document.getElementById('hiddenCanvas');
@@ -633,32 +613,15 @@ app.get('/', (req, res) => {
           sh = Math.round(sh * 0.9);
         }
 
-        const isSideways = currentRotation === 90 || currentRotation === 270;
-        canvas.width = isSideways ? sh : sw;
-        canvas.height = isSideways ? sw : sh;
+        canvas.width = sw;
+        canvas.height = sh;
 
-        ctx.save();
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate((currentRotation * Math.PI) / 180);
-        ctx.drawImage(img, sx, sy, sw, sh, -sw / 2, -sh / 2, sw, sh);
-        ctx.restore();
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
 
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const d = imgData.data;
 
-        if (activeFilter === 'grayscale') {
-          for (let i = 0; i < d.length; i += 4) {
-            const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-            d[i] = d[i + 1] = d[i + 2] = v;
-          }
-          ctx.putImageData(imgData, 0, 0);
-        } else if (activeFilter === 'bw') {
-          for (let i = 0; i < d.length; i += 4) {
-            const v = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) > 130 ? 255 : 0;
-            d[i] = d[i + 1] = d[i + 2] = v;
-          }
-          ctx.putImageData(imgData, 0, 0);
-        } else if (activeFilter === 'enhance') {
+        if (activeFilter === 'enhance') {
           const factor = (259 * (45 + 255)) / (255 * (259 - 45));
           for (let i = 0; i < d.length; i += 4) {
             d[i] = factor * (d[i] - 128) + 128;
@@ -685,19 +648,16 @@ app.get('/', (req, res) => {
       document.getElementById('whatsappPreviewModal').style.display = 'none';
       document.getElementById('uploadingModal').style.display = 'flex';
       
-      // Reset progress bar
       const progressBar = document.getElementById('uploadProgressBar');
       progressBar.style.width = '0%';
 
       const uploadPayload = await getDownscaledPayload(processedBase64);
 
       try {
-        // Use XMLHttpRequest to track actual upload progress
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/api/documents/upload', true);
         xhr.setRequestHeader('Content-Type', 'application/json');
 
-        // Track progress
         xhr.upload.onprogress = function(event) {
           if (event.lengthComputable) {
             const percentComplete = (event.loaded / event.total) * 100;
