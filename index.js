@@ -61,20 +61,33 @@ const Category = mongoose.models.Category || mongoose.model('Category', Category
 const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
 const Document = mongoose.models.Document || mongoose.model('Document', DocumentSchema);
 
-// Safe Database Connection
-async function ensureDb() {
-  if (mongoose.connection.readyState === 1) return;
-  if (!MONGODB_URI) throw new Error('MONGODB_URI is not set');
-  await mongoose.connect(MONGODB_URI, { maxPoolSize: 10, serverSelectionTimeoutMS: 5000 });
+// Safe Database Connection (Never times out Vercel lambdas)
+let isConnecting = false;
+async function connectDb() {
+  if (mongoose.connection.readyState >= 1) return;
+  if (!MONGODB_URI) throw new Error('MONGODB_URI is not configured in Vercel');
+  if (isConnecting) return;
+  
+  isConnecting = true;
+  try {
+    mongoose.set('bufferCommands', false); // Fail fast instead of freezing lambda
+    await mongoose.connect(MONGODB_URI, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 4000,
+      connectTimeoutMS: 4000
+    });
+  } finally {
+    isConnecting = false;
+  }
 }
 
 app.use(async (req, res, next) => {
   try {
-    await ensureDb();
+    await connectDb();
     next();
   } catch (err) {
     if (req.path.startsWith('/api/')) {
-      return res.status(503).json({ error: 'Database connecting, retry shortly: ' + err.message });
+      return res.status(503).json({ error: 'Database warming up, please retry: ' + err.message });
     }
     next();
   }
@@ -168,7 +181,7 @@ app.post('/api/documents/upload', async (req, res) => {
 
     const currentYear = '2082';
     const randCode = Math.floor(100000 + Math.random() * 900000);
-    const docRef = `MC-${currentYear}-${randCode}`;
+    const docRef = 'MC-' + currentYear + '-' + randCode;
 
     const doc = await Document.create({
       documentRef: docRef,
@@ -272,26 +285,12 @@ app.get('/', (req, res) => {
     .brand { font-size: 1.4rem; font-weight: 800; color: #668EF0; display: flex; align-items: center; gap: 8px; }
     .icon-bubble { width: 42px; height: 42px; border-radius: 50%; background: #fff; box-shadow: var(--clay-shadow); display: flex; align-items: center; justify-content: center; color: #668EF0; text-decoration: none; font-size: 1.15rem; cursor: pointer; }
 
-    /* Action Buttons (Native HTML Labels - Immune to Chrome Click Blocking) */
+    /* Action Buttons */
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
-    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; text-decoration:none; }
+    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; }
     .btn-cap { background: linear-gradient(135deg, #668EF0, #426fe4); box-shadow: 0 10px 20px rgba(102,142,240,0.3); }
     .btn-up { background: linear-gradient(135deg, #43C6AC, #2BB594); box-shadow: 0 10px 20px rgba(43,181,148,0.3); }
     .btn-act span.sub { font-size: 0.78rem; font-weight: 500; opacity: 0.9; }
-
-    /* Accessible Native Hidden Input (Maintains render layout box so Chrome never drops click) */
-    .accessible-hidden-input {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-      opacity: 0;
-    }
 
     .sec-header { display: flex; justify-content: space-between; align-items: center; margin: 24px 24px 10px; }
     .sec-title { font-weight: 800; font-size: 1.1rem; }
@@ -364,18 +363,18 @@ app.get('/', (req, res) => {
     </div>
   </header>
 
-  <!-- ACTIONS (Native HTML Labels: 100% Guaranteed to trigger OS File Chooser & Camera) -->
+  <!-- ACTIONS -->
   <div class="actions">
-    <label class="btn-act btn-cap" for="captureFileInput">
+    <button type="button" class="btn-act btn-cap" onclick="openPicker('camera')">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
-    </label>
-    <label class="btn-act btn-up" for="uploadFileInput">
+    </button>
+    <button type="button" class="btn-act btn-up" onclick="openPicker('file')">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
       <span class="sub">Gallery & PDFs</span>
-    </label>
+    </button>
   </div>
 
   <!-- DIRECTORY SECTION -->
@@ -391,7 +390,7 @@ app.get('/', (req, res) => {
   </div>
   <div id="docsContainer"><div class="doc-item">Fetching documents...</div></div>
 
-  <!-- 1. WHATSAPP STYLE REVIEW PREVIEW MODAL (Exact match to screenshot) -->
+  <!-- 1. WHATSAPP STYLE REVIEW PREVIEW MODAL -->
   <div id="whatsappPreviewModal">
     <div class="wa-top-bar">
       <div class="wa-top-left">
@@ -434,4 +433,463 @@ app.get('/', (req, res) => {
   </div>
 
   <!-- 2. UPLOADING ANIMATION MODAL -->
-  <div class="modal" id="uploadingMod
+  <div class="modal" id="uploadingModal">
+    <div class="modal-box" style="text-align:center; padding:36px 24px;">
+      <div class="spinner-ring"></div>
+      <h3 style="font-weight:800; margin-bottom:6px;">Uploading Document</h3>
+      <p style="font-size:0.85rem; color:var(--muted);">Compressing & saving to database...</p>
+    </div>
+  </div>
+
+  <!-- 3. DESTINATION FOLDER MODAL ("MOVE HERE" OR "UNCATEGORIZED") -->
+  <div class="modal" id="destinationModal">
+    <div class="modal-box">
+      <div style="text-align:center; margin-bottom:14px;">
+        <div style="width:52px; height:52px; background:var(--mint); color:#10B981; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:1.6rem; margin-bottom:8px;">
+          <i class="fa-solid fa-check"></i>
+        </div>
+        <h3 style="font-weight:800;">Upload Complete!</h3>
+        <p style="font-size:0.82rem; color:var(--muted);">Choose destination folder or save as uncategorized.</p>
+      </div>
+
+      <!-- Folder Navigation Tree Selection -->
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:18px; padding:16px; margin-bottom:16px;">
+        <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-building"></i> Destination Business</label>
+        <select id="destBiz" class="input" style="background:#fff;"></select>
+
+        <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-calendar"></i> Nepal Fiscal Year</label>
+        <select id="destFY" class="input" style="background:#fff;"></select>
+
+        <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-folder"></i> Destination Directory Folder</label>
+        <select id="destCat" class="input" style="background:#fff;"></select>
+      </div>
+
+      <!-- Prominent "Move Here" Button -->
+      <button class="btn-primary" onclick="confirmMoveToFolder()">
+        <i class="fa-solid fa-folder-open"></i> Move Here
+      </button>
+
+      <!-- Uncategorized Fallback Button -->
+      <button class="btn-secondary" onclick="confirmKeepUncategorized()">
+        <i class="fa-solid fa-inbox"></i> Save as Uncategorized
+      </button>
+    </div>
+  </div>
+
+  <!-- PASSWORD PROMPT MODAL -->
+  <div class="modal" id="pwdModal">
+    <div class="modal-box">
+      <div style="text-align:center; margin-bottom:12px;"><i class="fa-solid fa-lock" style="font-size:2.2rem; color:#007aff;"></i></div>
+      <h3 style="font-weight:800; text-align:center; margin-bottom:6px;">Protected Document</h3>
+      <p style="font-size:0.82rem; color:var(--muted); text-align:center; margin-bottom:16px;">Enter view password to view this file.</p>
+      <input type="password" id="viewPwdInput" class="input" placeholder="Enter View Password" autocomplete="off">
+      <button class="btn-primary" onclick="confirmPasswordView()">Unlock Document</button>
+      <div id="pwdError" style="color:red; font-size:0.82rem; margin-top:8px; text-align:center; font-weight:600;"></div>
+      <button class="btn-secondary" onclick="closeModal('pwdModal')">Cancel</button>
+    </div>
+  </div>
+
+  <!-- VIEWER MODAL -->
+  <div class="modal" id="viewModal">
+    <div class="modal-box" style="max-width:540px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <div>
+          <h4 id="vTitle" style="font-weight:800;"></h4>
+          <span id="vMeta" style="font-size:0.8rem; color:var(--muted);"></span>
+        </div>
+        <button onclick="closeModal('viewModal')" style="border:none; background:#eee; width:32px; height:32px; border-radius:50%; font-weight:800; cursor:pointer;">&times;</button>
+      </div>
+      <div id="vContent" style="text-align:center; min-height:220px; display:flex; justify-content:center; align-items:center;"></div>
+    </div>
+  </div>
+
+  <!-- Direct Native Inputs -->
+  <input type="file" id="directCamInput" accept="image/*" style="display:none;" onchange="handleIncomingFile(this)">
+  <input type="file" id="directUploadInput" accept="image/*,application/pdf" style="display:none;" onchange="handleIncomingFile(this)">
+
+  <script>
+    let currentRawBase64 = null;
+    let processedBase64 = null;
+    let currentMimeType = 'image/jpeg';
+    let currentFileName = 'document';
+    let currentFileSize = '0 KB';
+    let currentRotation = 0;
+    let activeFilter = 'original';
+    let latestUploadedDocId = null;
+    let selectedDocIdToView = null;
+
+    function openPicker(type) {
+      const el = document.getElementById(type === 'camera' ? 'directCamInput' : 'directUploadInput');
+      if (el) el.click();
+    }
+
+    function showToast(msg, type) {
+      const toast = document.getElementById('statusToast');
+      const icon = document.getElementById('toastIcon');
+      const text = document.getElementById('toastMsg');
+      toast.className = '';
+      if (type === 'success') {
+        toast.classList.add('success');
+        icon.className = 'fa-solid fa-circle-check';
+      } else if (type === 'error') {
+        toast.classList.add('error');
+        icon.className = 'fa-solid fa-triangle-exclamation';
+      } else {
+        icon.className = 'fa-solid fa-spinner fa-spin';
+      }
+      text.innerText = msg;
+      toast.classList.add('show');
+      if (type !== 'info') setTimeout(() => toast.classList.remove('show'), 3500);
+    }
+
+    function handleIncomingFile(input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+
+      currentFileName = file.name || 'document';
+      currentMimeType = file.type || 'image/jpeg';
+      currentFileSize = (file.size / 1024).toFixed(1) + ' KB';
+
+      if (currentMimeType === 'application/pdf' && file.size > 4 * 1024 * 1024) {
+        alert('This PDF exceeds 4MB (Vercel serverless limit). Please upload a file under 4MB.');
+        input.value = '';
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        currentRawBase64 = e.target.result;
+        processedBase64 = e.target.result;
+        openWhatsappPreview();
+      };
+      reader.readAsDataURL(file);
+      input.value = '';
+    }
+
+    function openWhatsappPreview() {
+      currentRotation = 0;
+      activeFilter = 'original';
+      document.getElementById('waCaptionInput').value = '';
+      document.getElementById('scanStrip').style.display = 'none';
+
+      if (currentMimeType.startsWith('image/')) {
+        document.getElementById('waPreviewImg').src = processedBase64;
+        document.getElementById('waPreviewImg').style.display = 'block';
+        document.getElementById('pdfPreviewCard').style.display = 'none';
+      } else {
+        document.getElementById('waPreviewImg').style.display = 'none';
+        document.getElementById('pdfPreviewCard').style.display = 'flex';
+        document.getElementById('pdfFileName').innerText = currentFileName;
+        document.getElementById('pdfFileSize').innerText = currentFileSize;
+      }
+
+      document.getElementById('whatsappPreviewModal').style.display = 'flex';
+    }
+
+    function toggleScanStrip() {
+      if (!currentMimeType.startsWith('image/')) return;
+      const strip = document.getElementById('scanStrip');
+      strip.style.display = strip.style.display === 'flex' ? 'none' : 'flex';
+    }
+
+    function discardPreview() {
+      document.getElementById('whatsappPreviewModal').style.display = 'none';
+      currentRawBase64 = null;
+      processedBase64 = null;
+    }
+
+    function applyFilter(mode) {
+      activeFilter = mode;
+      document.querySelectorAll('.scan-opt-btn').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+      renderProcessedImage();
+    }
+
+    function rotatePreview() {
+      currentRotation = (currentRotation + 90) % 360;
+      renderProcessedImage();
+    }
+
+    function renderProcessedImage() {
+      const img = new Image();
+      img.onload = function() {
+        const canvas = document.getElementById('hiddenCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let sw = img.width;
+        let sh = img.height;
+        let sx = 0, sy = 0;
+
+        if (activeFilter === 'crop') {
+          sx = Math.round(sw * 0.05);
+          sy = Math.round(sh * 0.05);
+          sw = Math.round(sw * 0.9);
+          sh = Math.round(sh * 0.9);
+        }
+
+        const isSideways = currentRotation === 90 || currentRotation === 270;
+        canvas.width = isSideways ? sh : sw;
+        canvas.height = isSideways ? sw : sh;
+
+        ctx.save();
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((currentRotation * Math.PI) / 180);
+        ctx.drawImage(img, sx, sy, sw, sh, -sw / 2, -sh / 2, sw, sh);
+        ctx.restore();
+
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = imgData.data;
+
+        if (activeFilter === 'grayscale') {
+          for (let i = 0; i < d.length; i += 4) {
+            const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            d[i] = d[i + 1] = d[i + 2] = v;
+          }
+          ctx.putImageData(imgData, 0, 0);
+        } else if (activeFilter === 'bw') {
+          for (let i = 0; i < d.length; i += 4) {
+            const v = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) > 130 ? 255 : 0;
+            d[i] = d[i + 1] = d[i + 2] = v;
+          }
+          ctx.putImageData(imgData, 0, 0);
+        } else if (activeFilter === 'enhance') {
+          const factor = (259 * (45 + 255)) / (255 * (259 - 45));
+          for (let i = 0; i < d.length; i += 4) {
+            d[i] = factor * (d[i] - 128) + 128;
+            d[i + 1] = factor * (d[i + 1] - 128) + 128;
+            d[i + 2] = factor * (d[i + 2] - 128) + 128;
+          }
+          ctx.putImageData(imgData, 0, 0);
+        }
+
+        processedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+        document.getElementById('waPreviewImg').src = processedBase64;
+      };
+      img.src = currentRawBase64;
+    }
+
+    async function executeUpload() {
+      if (!processedBase64) return;
+
+      const caption = document.getElementById('waCaptionInput').value.trim();
+
+      document.getElementById('whatsappPreviewModal').style.display = 'none';
+      document.getElementById('uploadingModal').style.display = 'flex';
+
+      const uploadPayload = await getDownscaledPayload(processedBase64);
+
+      try {
+        const res = await fetch('/api/documents/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileBase64: uploadPayload,
+            mimeType: currentMimeType,
+            fileName: currentFileName,
+            fileSize: currentFileSize,
+            partyName: caption
+          })
+        });
+
+        const data = await res.json();
+        closeModal('uploadingModal');
+
+        if (res.ok && data.success) {
+          latestUploadedDocId = data.document._id;
+          document.getElementById('destinationModal').style.display = 'flex';
+          loadData();
+        } else {
+          showToast('Upload error: ' + (data.error || 'Server error'), 'error');
+        }
+      } catch (err) {
+        closeModal('uploadingModal');
+        showToast('Connection error: ' + err.message, 'error');
+      }
+    }
+
+    function getDownscaledPayload(base64) {
+      return new Promise((resolve) => {
+        if (!currentMimeType.startsWith('image/')) return resolve(base64);
+
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let w = img.width;
+          let h = img.height;
+          const maxDim = 850;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+            else { w = Math.round((w * maxDim) / h); h = maxDim; }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.68));
+        };
+        img.onerror = () => resolve(base64);
+        img.src = base64;
+      });
+    }
+
+    async function confirmMoveToFolder() {
+      if (!latestUploadedDocId) return;
+
+      const bizId = document.getElementById('destBiz').value;
+      const fyId = document.getElementById('destFY').value;
+      const catId = document.getElementById('destCat').value;
+
+      closeModal('destinationModal');
+      showToast('Filing document to folder...', 'info');
+
+      try {
+        const res = await fetch('/api/documents/' + latestUploadedDocId + '/organize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ businessId: bizId, fiscalYearId: fyId, categoryId: catId, isUncategorized: false })
+        });
+        if (res.ok) {
+          showToast('Document moved to folder successfully!', 'success');
+          loadData();
+        }
+      } catch (e) {
+        showToast('Error organizing folder', 'error');
+      }
+    }
+
+    async function confirmKeepUncategorized() {
+      if (!latestUploadedDocId) return;
+      closeModal('destinationModal');
+
+      try {
+        await fetch('/api/documents/' + latestUploadedDocId + '/organize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isUncategorized: true })
+        });
+        showToast('Saved to Uncategorized Inbox!', 'success');
+        loadData();
+      } catch (e) {
+        showToast('Saved', 'success');
+      }
+    }
+
+    async function loadData() {
+      try {
+        const [bRes, fRes, cRes, dRes] = await Promise.all([
+          fetch('/api/businesses').catch(() => null),
+          fetch('/api/fiscal-years').catch(() => null),
+          fetch('/api/categories').catch(() => null),
+          fetch('/api/documents').catch(() => null)
+        ]);
+
+        const businesses = (bRes && bRes.ok) ? await bRes.json() : [];
+        const fiscalYears = (fRes && fRes.ok) ? await fRes.json() : [];
+        const categories = (cRes && cRes.ok) ? await cRes.json() : [];
+        const docs = (dRes && dRes.ok) ? await dRes.json() : { documents: [] };
+
+        const bizArr = Array.isArray(businesses) ? businesses : [];
+        const fyArr = Array.isArray(fiscalYears) ? fiscalYears : [];
+        const catArr = Array.isArray(categories) ? categories : [];
+        const docArr = (docs && Array.isArray(docs.documents)) ? docs.documents : [];
+
+        // Directory
+        if (bizArr.length > 0) {
+          document.getElementById('bizContainer').innerHTML = bizArr.map(function(b) {
+            return '<div class="biz-card">' +
+              '<div style="font-weight:700;"><i class="fa-solid fa-folder-open" style="color:#007aff; margin-right:6px;"></i>' + b.businessName + '</div>' +
+              '<div style="font-size:0.8rem; color:var(--muted); margin-top:4px;">' + b.documentCount + ' Document' + (b.documentCount === 1 ? '' : 's') + '</div>' +
+            '</div>';
+          }).join('');
+
+          document.getElementById('destBiz').innerHTML = bizArr.map(function(b) {
+            return '<option value="' + b._id + '">' + b.businessName + '</option>';
+          }).join('');
+        }
+
+        if (fyArr.length > 0) {
+          document.getElementById('destFY').innerHTML = fyArr.map(function(f) {
+            return '<option value="' + f._id + '">FY ' + f.fiscalYear + '</option>';
+          }).join('');
+        }
+        if (catArr.length > 0) {
+          document.getElementById('destCat').innerHTML = catArr.map(function(c) {
+            return '<option value="' + c._id + '">📁 ' + c.name + '</option>';
+          }).join('');
+        }
+
+        // Recent Documents
+        if (docArr.length > 0) {
+          document.getElementById('docsContainer').innerHTML = docArr.map(function(d) {
+            const iconClass = d.fileType === 'application/pdf' ? 'fa-file-pdf' : 'fa-file-lines';
+            const bName = d.businessId ? d.businessId.businessName : (d.isInbox ? 'Uncategorized Inbox' : 'General');
+            const cName = d.categoryId ? d.categoryId.name : (d.fileType === 'application/pdf' ? 'PDF Document' : 'File');
+            const pName = d.partyName ? ' (' + d.partyName + ')' : '';
+
+            return '<div class="doc-item" onclick="promptView(\\'' + d._id + '\\')">' +
+              '<div>' +
+                '<div class="doc-ref"><i class="fa-solid ' + iconClass + '" style="color:#007aff; margin-right:6px;"></i>' + d.documentRef + '</div>' +
+                '<div class="doc-sub">' + bName + ' • ' + cName + pName + '</div>' +
+              '</div>' +
+              '<i class="fa-solid fa-lock" style="color:#c5cbe0;"></i>' +
+            '</div>';
+          }).join('');
+        } else {
+          document.getElementById('docsContainer').innerHTML = '<div class="doc-item" style="color:var(--muted); justify-content:center;">No documents uploaded yet. Tap CAPTURE or UPLOAD!</div>';
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function promptView(id) {
+      selectedDocIdToView = id;
+      document.getElementById('pwdError').innerText = '';
+      document.getElementById('viewPwdInput').value = '';
+      document.getElementById('pwdModal').style.display = 'flex';
+    }
+
+    async function confirmPasswordView() {
+      const pwd = document.getElementById('viewPwdInput').value;
+      if (!pwd) return;
+
+      try {
+        const res = await fetch('/api/documents/' + selectedDocIdToView + '/view', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          closeModal('pwdModal');
+          document.getElementById('vTitle').innerText = data.documentRef;
+          document.getElementById('vMeta').innerText = data.businessName + ' • ' + data.categoryName;
+          
+          if (data.fileType.startsWith('image/')) {
+            document.getElementById('vContent').innerHTML = '<img src="' + data.fileData + '" style="max-width:100%; max-height:65vh; border-radius:12px; object-fit:contain;">';
+          } else {
+            document.getElementById('vContent').innerHTML = '<iframe src="' + data.fileData + '" style="width:100%; height:60vh; border:none;"></iframe>';
+          }
+          document.getElementById('viewModal').style.display = 'flex';
+        } else {
+          document.getElementById('pwdError').innerText = data.error || 'Incorrect password';
+        }
+      } catch (err) {
+        document.getElementById('pwdError').innerText = 'Connection error';
+      }
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).style.display = 'none';
+    }
+
+    window.addEventListener('DOMContentLoaded', loadData);
+  </script>
+</body>
+</html>`);
+});
+
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT);
+}
+module.exports = app;
