@@ -7,16 +7,12 @@
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
-const helmet = require('helmet');
-const cors = require('cors');
+const jwt = require('jsonwebtoken');
 
 const app = express();
-
-app.use(helmet({ credentials: true, crossOriginEmbedderPolicy: false }));
-app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
-// Re-use connection cache
+const JWT_SECRET = process.env.JWT_SECRET || 'memoclick-production-crypto-fallback-key-2082';
 const MONGODB_URI = process.env.MONGODB_URI;
 let cachedDb = global.__mongoConn || null;
 
@@ -27,183 +23,93 @@ async function ensureDb() {
   global.__mongoConn = cachedDb;
   return cachedDb;
 }
-
 app.use(async (req, res, next) => {
   await ensureDb();
   next();
 });
 
-// Access Models
-const Document = mongoose.models.Document;
-const Business = mongoose.models.Business;
-const FiscalYear = mongoose.models.FiscalYear;
-const Category = mongoose.models.Category;
-const BackupJob = mongoose.models.BackupJob;
-const BackupLog = mongoose.models.BackupLog;
-const AuditLog = mongoose.models.AuditLog;
-const DocumentFile = mongoose.models.DocumentFile;
-
-// Admin Metrics API
-app.get('/api/admin/metrics', async (req, res) => {
+// Middleware to verify Admin/Owner role
+const requireAdmin = (req, res, next) => {
   try {
-    const [bizCount, fyCount, docCount, pendingBackups, backedUp, failedBackups, totalFiles] = await Promise.all([
-      Business.countDocuments({ isActive: true }),
-      FiscalYear.countDocuments({ isActive: true }),
-      Document.countDocuments(),
-      BackupJob.countDocuments({ status: 'Pending' }),
-      BackupJob.countDocuments({ status: 'Backed Up' }),
-      BackupJob.countDocuments({ status: 'Failed' }),
-      DocumentFile.aggregate([{ $group: { _id: null, totalBytes: { $sum: '$fileSize' } } }])
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Admin authentication required' });
+    const decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
+    if (decoded.role !== 'Owner' && decoded.role !== 'Administrator') {
+      return res.status(403).json({ error: 'Access denied: Requires Admin privileges' });
+    }
+    req.user = decoded;
+    next();
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid or expired session' });
+  }
+};
+
+app.get('/api/admin/metrics', requireAdmin, async (req, res) => {
+  try {
+    const Business = mongoose.models.Business;
+    const Document = mongoose.models.Document;
+    const [bizCount, docCount] = await Promise.all([
+      Business ? Business.countDocuments() : 0,
+      Document ? Document.countDocuments() : 0
     ]);
-
-    const totalBytes = (totalFiles[0] && totalFiles[0].totalBytes) || 0;
-    const mbUsed = (totalBytes / (1024 * 1024)).toFixed(2);
-
-    res.json({
-      totalBusinesses: bizCount,
-      totalFiscalYears: fyCount,
-      totalDocuments: docCount,
-      pendingBackups,
-      backedUp,
-      failedBackups,
-      storageMB: mbUsed
-    });
+    res.json({ totalBusinesses: bizCount, totalDocuments: docCount, serverStatus: 'HEALTHY' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Admin Retry Trigger for Failed Backup Job
-app.post('/api/admin/backup/retry/:jobId', async (req, res) => {
-  try {
-    const job = await BackupJob.findById(req.params.jobId);
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    job.status = 'Pending';
-    job.errorMessage = null;
-    await job.save();
-    res.json({ message: 'Backup job marked for immediate retry', job });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Render Claymorphic Admin Interface
 app.get('*', (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MemoClick – Administrative Console</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <title>Admin Portal - MemoClick</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;800&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --primary: #668EF0;
-      --bg: #F4F6FB;
-      --card-bg: #FFFFFF;
-      --text: #283247;
-      --muted: #7B8498;
-      --clay-shadow: 6px 6px 14px #d8dfea, -6px -6px 14px #ffffff;
-      --clay-inset: inset 2px 2px 5px #d8dfea, inset -2px -2px 5px #ffffff;
-    }
-    * { box-sizing: border-box; margin:0; padding:0; font-family: 'Plus Jakarta Sans', sans-serif; }
-    body { background: var(--bg); color: var(--text); padding: 24px; }
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-    .clay-card { background: var(--card-bg); border-radius: 20px; box-shadow: var(--clay-shadow); padding: 20px; border: 1px solid rgba(255,255,255,0.7); }
-    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 28px; }
-    .metric-val { font-size: 2rem; font-weight: 800; color: var(--primary); margin-top: 6px; }
-    .metric-lbl { font-size: 0.82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; }
-    .nav-link { color: var(--primary); text-decoration: none; font-weight: 700; font-size: 0.9rem; }
-    table { width: 100%; border-collapse: collapse; margin-top: 14px; }
-    th, td { text-align: left; padding: 12px; font-size: 0.85rem; border-bottom: 1px solid #edf0f7; }
-    th { color: var(--muted); font-weight: 700; }
-    .badge { padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; }
-    .badge-success { background: #C9EBDD; color: #1B7F53; }
-    .badge-warn { background: #FFF0C7; color: #9E7400; }
-    .badge-danger { background: #FFE3D3; color: #C2410C; }
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background: #F4F6FB; color: #283247; padding: 24px; }
+    .card { background: #fff; padding: 20px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); max-width: 600px; margin: 20px auto; }
+    .val { font-size: 2rem; font-weight: 800; color: #668EF0; margin-top: 6px; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div>
-      <h2 style="font-weight:800;"><i class="fa-solid fa-shield-halved" style="color:var(--primary)"></i> MemoClick Admin Console</h2>
-      <p style="color:var(--muted); font-size:0.85rem;">System Health, Audit Log & Google Drive Sync Diagnostics</p>
-    </div>
-    <a href="/" class="nav-link"><i class="fa-solid fa-arrow-left"></i> Return to Main App</a>
+  <div style="max-width:600px; margin:0 auto; display:flex; justify-content:space-between; align-items:center;">
+    <h2>Admin Dashboard</h2>
+    <a href="/" style="color:#668EF0; text-decoration:none; font-weight:700;">Back to App</a>
   </div>
-
-  <div class="metrics-grid">
-    <div class="clay-card">
-      <div class="metric-lbl">Total Documents</div>
-      <div class="metric-val" id="metricDocs">-</div>
-    </div>
-    <div class="clay-card">
-      <div class="metric-lbl">Active Businesses</div>
-      <div class="metric-val" id="metricBiz">-</div>
-    </div>
-    <div class="clay-card">
-      <div class="metric-lbl">Storage Utilized</div>
-      <div class="metric-val" id="metricStorage">- MB</div>
-    </div>
-    <div class="clay-card">
-      <div class="metric-lbl">GDrive Backed Up</div>
-      <div class="metric-val" style="color:#27AE60;" id="metricBackedUp">-</div>
-    </div>
-    <div class="clay-card">
-      <div class="metric-lbl">Backup Incomplete / Failed</div>
-      <div class="metric-val" style="color:#EB5757;" id="metricFailed">-</div>
+  <div id="adminContent">
+    <div class="card" id="lockMsg">
+      <h3>🔒 Admin Authorization Required</h3>
+      <p style="color:#7B8498; margin:8px 0 16px;">Please log in as an administrator from the main app first.</p>
+      <a href="/" style="display:inline-block; padding:10px 18px; background:#668EF0; color:#fff; border-radius:10px; text-decoration:none; font-weight:700;">Go to Login</a>
     </div>
   </div>
-
-  <div class="clay-card">
-    <h3 style="font-weight:800; margin-bottom:12px;">Persistent Audit Trail & Backup Queue</h3>
-    <table id="auditTable">
-      <thead>
-        <tr>
-          <th>Timestamp</th>
-          <th>Event</th>
-          <th>Status</th>
-          <th>Verification</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Just now</td>
-          <td>Serverless Initialized</td>
-          <td><span class="badge badge-success">Active</span></td>
-          <td>SHA-256 Verified</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
   <script>
-    async function fetchMetrics() {
-      try {
-        const res = await fetch('/api/admin/metrics');
-        const data = await res.json();
-        document.getElementById('metricDocs').innerText = data.totalDocuments;
-        document.getElementById('metricBiz').innerText = data.totalBusinesses;
-        document.getElementById('metricStorage').innerText = data.storageMB + ' MB';
-        document.getElementById('metricBackedUp').innerText = data.backedUp;
-        document.getElementById('metricFailed').innerText = (data.pendingBackups + data.failedBackups);
-      } catch (e) {
-        console.error(e);
-      }
+    const token = localStorage.getItem('mc_token');
+    if (token) {
+      fetch('/api/admin/metrics', { headers: { Authorization: 'Bearer ' + token } })
+        .then(r => {
+          if (!r.ok) throw new Error('Unauthorized');
+          return r.json();
+        })
+        .then(data => {
+          document.getElementById('adminContent').innerHTML = \`
+            <div class="card">
+              <div>Total Businesses</div>
+              <div class="val">\${data.totalBusinesses}</div>
+            </div>
+            <div class="card">
+              <div>Total Documents</div>
+              <div class="val">\${data.totalDocuments}</div>
+            </div>
+          \`;
+        })
+        .catch(() => {
+          document.getElementById('lockMsg').style.display = 'block';
+        });
     }
-    fetchMetrics();
-    setInterval(fetchMetrics, 10000);
   </script>
 </body>
 </html>`);
 });
-
-const PORT = process.env.ADMIN_PORT || 3001;
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => console.log(`🛡️ MemoClick Admin listening on http://localhost:${PORT}`));
-}
 
 module.exports = app;
