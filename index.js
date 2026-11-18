@@ -282,20 +282,13 @@ app.get('/', (req, res) => {
 
     /* Action Buttons */
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
-    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; position: relative; overflow: hidden; }
+    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; }
     .btn-cap { background: linear-gradient(135deg, #668EF0, #426fe4); box-shadow: 0 10px 20px rgba(102,142,240,0.3); }
     .btn-up { background: linear-gradient(135deg, #43C6AC, #2BB594); box-shadow: 0 10px 20px rgba(43,181,148,0.3); }
     .btn-act span.sub { font-size: 0.78rem; font-weight: 500; opacity: 0.9; }
 
-    /* Invisible file inputs covering the labels */
-    .file-input-hidden {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      width: 100%; height: 100%;
-      opacity: 0;
-      cursor: pointer;
-      z-index: 10;
-    }
+    /* Hide inputs completely from the user */
+    .hidden-input { display: none; }
 
     .sec-header { display: flex; justify-content: space-between; align-items: center; margin: 24px 24px 10px; }
     .sec-title { font-weight: 800; font-size: 1.1rem; }
@@ -316,7 +309,7 @@ app.get('/', (req, res) => {
     .btn-primary { width:100%; padding:15px; background:#007aff; color:#fff; border:none; border-radius:14px; font-weight:800; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; gap:8px; }
     .btn-secondary { width:100%; padding:13px; background:#f1f5f9; color:var(--text); border:none; border-radius:14px; font-weight:700; cursor:pointer; font-size:0.95rem; margin-top:8px; }
 
-    /* PREVIEW MODAL */
+    /* PREVIEW MODAL (WhatsApp Style) */
     #whatsappPreviewModal { display:none; position:fixed; inset:0; background:#0b141a; z-index:10001; flex-direction:column; justify-content:space-between; }
     .wa-top-bar { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; background:rgba(11,20,26,0.95); color:#e9edef; }
     .wa-top-left { display:flex; align-items:center; gap:12px; font-weight:700; font-size:1.1rem; }
@@ -334,8 +327,8 @@ app.get('/', (req, res) => {
     .scan-opt-btn { padding:8px 16px; border-radius:20px; font-size:0.85rem; font-weight:700; background:#374248; color:#fff; border:none; cursor:pointer; white-space:nowrap; transition: 0.2s; }
     .scan-opt-btn.active { background:#007aff; box-shadow: 0 0 10px rgba(0,122,255,0.4); }
 
-    .wa-bottom-bar { padding:14px 18px; background:rgba(11,20,26,0.95); display:flex; gap:10px; align-items:center; }
-    .wa-caption-input { flex:1; padding:12px 18px; border-radius:24px; border:1px solid #374248; background:#202c33; color:#fff; font-size:0.95rem; outline:none; }
+    .wa-bottom-bar { padding:14px 18px; background:rgba(11,20,26,0.95); display:flex; flex-direction: column; gap: 12px; padding-bottom: 24px;}
+    .wa-caption-input { width:100%; padding:12px 18px; border-radius:24px; border:1px solid #374248; background:#202c33; color:#fff; font-size:0.95rem; outline:none; }
     .wa-float-send { width:100%; padding:16px; border-radius:14px; background:#007aff; color:#fff; border:none; font-weight:800; font-size:1rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
 
     /* Toast */
@@ -368,20 +361,23 @@ app.get('/', (req, res) => {
 
   <!-- ACTIONS -->
   <div class="actions">
-    <label class="btn-act btn-cap">
+    <!-- Call the function using inline onclick to prevent weird browser conflicts -->
+    <button type="button" class="btn-act btn-cap" onclick="document.getElementById('directCamInput').click()">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
-      <input type="file" id="directCamInput" class="file-input-hidden" accept="image/*" capture="environment" onchange="handleIncomingFile(this)">
-    </label>
+    </button>
 
-    <label class="btn-act btn-up">
+    <button type="button" class="btn-act btn-up" onclick="document.getElementById('directUploadInput').click()">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
       <span class="sub">Gallery & PDFs</span>
-      <input type="file" id="directUploadInput" class="file-input-hidden" accept="image/*,application/pdf" onchange="handleIncomingFile(this)">
-    </label>
+    </button>
   </div>
+
+  <!-- Hidden Inputs -->
+  <input type="file" id="directCamInput" class="hidden-input" accept="image/*" capture="environment" onchange="handleIncomingFile(this)">
+  <input type="file" id="directUploadInput" class="hidden-input" accept="image/*,application/pdf" onchange="handleIncomingFile(this)">
 
   <!-- DIRECTORY SECTION -->
   <div class="sec-header">
@@ -427,8 +423,8 @@ app.get('/', (req, res) => {
     </div>
 
     <!-- Bottom Caption Bar & Upload Button -->
-    <div class="wa-bottom-bar" style="flex-direction: column; gap: 12px; padding-bottom: 24px;">
-      <input type="text" id="waCaptionInput" class="wa-caption-input" placeholder="Add a caption / Party name..." autocomplete="off" style="width: 100%;">
+    <div class="wa-bottom-bar">
+      <input type="text" id="waCaptionInput" class="wa-caption-input" placeholder="Add a caption / Party name..." autocomplete="off">
       <button class="wa-float-send" onclick="executeUpload()">
         <i class="fa-solid fa-cloud-arrow-up"></i> Upload Document
       </button>
