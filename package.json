@@ -4,7 +4,7 @@
   "description": "MemoClick - Full-Stack Business Document Filing & Management System",
   "main": "index.js",
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "start": "node index.js",
@@ -35,6 +35,6 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.10.1",
     "multer": "^1.4.5-lts.1",
-    "pdf-lib": "^1.17.9"
+    "pdf-lib": "^1.17.1"
   }
 }
