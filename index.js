@@ -5,6 +5,15 @@
 'use strict';
 
 require('dotenv').config();
+
+// Global Process Crash Guards (Prevents Vercel 500 FUNCTION_INVOCATION_FAILED)
+process.on('uncaughtException', (err) => {
+  console.error('Process Uncaught Exception:', err.message);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Process Unhandled Rejection:', reason);
+});
+
 const express = require('express');
 const mongoose = require('mongoose');
 const helmet = require('helmet');
@@ -61,36 +70,37 @@ const Category = mongoose.models.Category || mongoose.model('Category', Category
 const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
 const Document = mongoose.models.Document || mongoose.model('Document', DocumentSchema);
 
-// Safe Database Connection (Never times out Vercel lambdas)
-let isConnecting = false;
+// Safe Mongoose Connection Cache
+let cachedDb = null;
 async function connectDb() {
-  if (mongoose.connection.readyState >= 1) return;
-  if (!MONGODB_URI) throw new Error('MONGODB_URI is not configured in Vercel');
-  if (isConnecting) return;
-  
-  isConnecting = true;
-  try {
-    mongoose.set('bufferCommands', false); // Fail fast instead of freezing lambda
-    await mongoose.connect(MONGODB_URI, {
+  if (mongoose.connection.readyState >= 1) return mongoose.connection;
+  if (!cachedDb) {
+    if (!MONGODB_URI) {
+      console.warn('MONGODB_URI is not set in environment variables');
+      return null;
+    }
+    mongoose.set('strictQuery', true);
+    mongoose.set('autoIndex', false);
+    cachedDb = mongoose.connect(MONGODB_URI, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 4000,
       connectTimeoutMS: 4000
+    }).catch(err => {
+      cachedDb = null;
+      console.error('Mongoose connection failed:', err.message);
+      return null;
     });
-  } finally {
-    isConnecting = false;
   }
+  return cachedDb;
 }
 
 app.use(async (req, res, next) => {
   try {
     await connectDb();
-    next();
-  } catch (err) {
-    if (req.path.startsWith('/api/')) {
-      return res.status(503).json({ error: 'Database warming up, please retry: ' + err.message });
-    }
-    next();
+  } catch (e) {
+    console.error('Middleware DB check:', e.message);
   }
+  next();
 });
 
 app.use(helmet({
@@ -249,8 +259,8 @@ app.post('/api/documents/:id/view', async (req, res) => {
       fileType: doc.fileType,
       fileName: doc.fileName,
       documentRef: doc.documentRef,
-      businessName: doc.businessId?.businessName || (doc.isInbox ? 'Uncategorized' : 'General'),
-      categoryName: doc.categoryId?.name || (doc.isInbox ? 'Inbox' : 'File')
+      businessName: doc.businessId ? doc.businessId.businessName : (doc.isInbox ? 'Uncategorized' : 'General'),
+      categoryName: doc.categoryId ? doc.categoryId.name : (doc.isInbox ? 'Inbox' : 'File')
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -825,7 +835,7 @@ app.get('/', (req, res) => {
             const cName = d.categoryId ? d.categoryId.name : (d.fileType === 'application/pdf' ? 'PDF Document' : 'File');
             const pName = d.partyName ? ' (' + d.partyName + ')' : '';
 
-            return '<div class="doc-item" onclick="promptView(\\'' + d._id + '\\')">' +
+            return '<div class="doc-item" data-id="' + d._id + '" onclick="promptView(this.dataset.id)">' +
               '<div>' +
                 '<div class="doc-ref"><i class="fa-solid ' + iconClass + '" style="color:#007aff; margin-right:6px;"></i>' + d.documentRef + '</div>' +
                 '<div class="doc-sub">' + bName + ' • ' + cName + pName + '</div>' +
