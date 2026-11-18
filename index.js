@@ -282,13 +282,20 @@ app.get('/', (req, res) => {
 
     /* Action Buttons */
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
-    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; }
+    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; position: relative; overflow: hidden; }
     .btn-cap { background: linear-gradient(135deg, #668EF0, #426fe4); box-shadow: 0 10px 20px rgba(102,142,240,0.3); }
     .btn-up { background: linear-gradient(135deg, #43C6AC, #2BB594); box-shadow: 0 10px 20px rgba(43,181,148,0.3); }
     .btn-act span.sub { font-size: 0.78rem; font-weight: 500; opacity: 0.9; }
 
-    /* Hide inputs completely from the user */
-    .hidden-input { display: none; }
+    /* The invisible input that perfectly covers the button */
+    .file-input-absolute {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%; height: 100%;
+      opacity: 0;
+      cursor: pointer;
+      z-index: 10;
+    }
 
     .sec-header { display: flex; justify-content: space-between; align-items: center; margin: 24px 24px 10px; }
     .sec-title { font-weight: 800; font-size: 1.1rem; }
@@ -361,23 +368,23 @@ app.get('/', (req, res) => {
 
   <!-- ACTIONS -->
   <div class="actions">
-    <!-- Call the function using inline onclick to prevent weird browser conflicts -->
-    <button type="button" class="btn-act btn-cap" onclick="document.getElementById('directCamInput').click()">
+    <!-- CAPTURE BUTTON -->
+    <div class="btn-act btn-cap">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
-    </button>
+      <!-- Input is position absolute to cover the whole button. No JS click needed. -->
+      <input type="file" id="directCamInput" class="file-input-absolute" accept="image/*" capture="environment" onchange="handleIncomingFile(this)">
+    </div>
 
-    <button type="button" class="btn-act btn-up" onclick="document.getElementById('directUploadInput').click()">
+    <!-- UPLOAD BUTTON -->
+    <div class="btn-act btn-up">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
       <span class="sub">Gallery & PDFs</span>
-    </button>
+      <input type="file" id="directUploadInput" class="file-input-absolute" accept="image/*,application/pdf" onchange="handleIncomingFile(this)">
+    </div>
   </div>
-
-  <!-- Hidden Inputs -->
-  <input type="file" id="directCamInput" class="hidden-input" accept="image/*" capture="environment" onchange="handleIncomingFile(this)">
-  <input type="file" id="directUploadInput" class="hidden-input" accept="image/*,application/pdf" onchange="handleIncomingFile(this)">
 
   <!-- DIRECTORY SECTION -->
   <div class="sec-header">
@@ -571,7 +578,7 @@ app.get('/', (req, res) => {
         document.getElementById('pdfPreviewCard').style.display = 'flex';
         document.getElementById('pdfFileName').innerText = currentFileName;
         document.getElementById('pdfFileSize').innerText = currentFileSize;
-        document.getElementById('scanStrip').style.display = 'none'; // Hide for PDF
+        document.getElementById('scanStrip').style.display = 'none'; 
       }
 
       document.getElementById('whatsappPreviewModal').style.display = 'flex';
