@@ -1,5 +1,5 @@
 /**
- * MEMOCLICK - FULL-STACK BUSINESS DOCUMENT MANAGEMENT SYSTEM
+ * MEMOCLICK - PUBLIC CLIENT & FILING SYSTEM
  * File: index.js
  */
 'use strict';
@@ -59,27 +59,26 @@ const Category = mongoose.models.Category || mongoose.model('Category', Category
 const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
 const Document = mongoose.models.Document || mongoose.model('Document', DocumentSchema);
 
-// Connection Pool
-let connPromise = null;
-async function connectDb() {
-  if (mongoose.connection.readyState === 1) return mongoose.connection;
-  if (!connPromise) {
-    if (!MONGODB_URI) throw new Error('MONGODB_URI is missing');
-    connPromise = mongoose.connect(MONGODB_URI, {
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-      connectTimeoutMS: 5000
-    });
-  }
-  return connPromise;
+// Safe Database Connection (Never crashes Lambda on cold start)
+async function ensureDb() {
+  if (mongoose.connection.readyState === 1) return;
+  if (!MONGODB_URI) throw new Error('MONGODB_URI is not set');
+  await mongoose.connect(MONGODB_URI, {
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 5000
+  });
 }
 
 app.use(async (req, res, next) => {
   try {
-    await connectDb();
+    await ensureDb();
     next();
   } catch (err) {
-    res.status(503).json({ error: 'Database connecting...' });
+    console.error('Database connection notice:', err.message);
+    if (req.path.startsWith('/api/')) {
+      return res.status(503).json({ error: 'Database connecting, please retry: ' + err.message });
+    }
+    next(); // Always allow HTML interface to load
   }
 });
 
@@ -98,9 +97,7 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// ==========================================
-// PUBLIC REST APIS
-// ==========================================
+// APIs
 app.get('/api/businesses', async (req, res) => {
   try {
     let list = await Business.find({ isActive: true });
@@ -138,10 +135,7 @@ app.get('/api/categories', async (req, res) => {
       list = await Category.create([
         { name: 'Purchase Bills', icon: 'fa-shopping-bag', color: '#27AE60' },
         { name: 'Sales Bills', icon: 'fa-cash-register', color: '#2F80ED' },
-        { name: 'Debit Notes', icon: 'fa-file-invoice-dollar', color: '#668EF0' },
-        { name: 'Credit Notes', icon: 'fa-receipt', color: '#9B51E0' },
         { name: 'Tax Documents', icon: 'fa-landmark', color: '#EB5757' },
-        { name: 'Agreements', icon: 'fa-file-contract', color: '#10B981' },
         { name: 'Other Documents', icon: 'fa-folder-open', color: '#7B8498' }
       ]);
     }
@@ -153,12 +147,8 @@ app.get('/api/categories', async (req, res) => {
 
 app.get('/api/documents', async (req, res) => {
   try {
-    const { isInbox, businessId, categoryId } = req.query;
-    const filter = {};
-    if (isInbox === 'true') filter.isInbox = true;
-    if (businessId) filter.businessId = businessId;
-    if (categoryId) filter.categoryId = categoryId;
-
+    const { isInbox } = req.query;
+    const filter = isInbox === 'true' ? { isInbox: true } : {};
     const docs = await Document.find(filter)
       .select('-fileData')
       .populate('businessId', 'businessName')
@@ -172,7 +162,7 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
-// Password Protected Document View
+// View Document with Password
 app.post('/api/documents/:id/view', async (req, res) => {
   try {
     const { password } = req.body;
@@ -203,7 +193,7 @@ app.post('/api/documents/:id/view', async (req, res) => {
   }
 });
 
-// Collision-Free Document Upload API
+// Upload Endpoint
 app.post('/api/documents/upload', async (req, res) => {
   try {
     const { businessId, fiscalYearId, categoryId, partyName, fileBase64, mimeType, isInbox } = req.body;
@@ -222,7 +212,7 @@ app.post('/api/documents/upload', async (req, res) => {
       if (!cId) { const c = await Category.findOne(); if (c) cId = c._id; }
     }
 
-    // Unique Collision-Free Reference Generator
+    // Unique Collision-Free Reference
     const currentYear = '2082';
     const randCode = Math.floor(100000 + Math.random() * 900000);
     const docRef = `MC-${currentYear}-${randCode}`;
@@ -254,9 +244,7 @@ app.post('/api/documents/upload', async (req, res) => {
   }
 });
 
-// ==========================================
-// USER INTERFACE (CLAYMORPHISM)
-// ==========================================
+// UI View
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!DOCTYPE html>
@@ -264,17 +252,12 @@ app.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>MemoClick – Business Document Management</title>
+  <title>MemoClick – Document Filing</title>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
     :root {
       --primary: #668EF0;
-      --soft-blue: #E5EEFF;
-      --mint: #C9EBDD;
-      --lavender: #E9E0FF;
-      --peach: #FFE3D3;
-      --yellow: #FFF0C7;
       --bg: #F4F6FB;
       --card: #FFFFFF;
       --text: #283247;
@@ -290,7 +273,7 @@ app.get('/', (req, res) => {
 
     /* Hero Buttons */
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
-    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: none; outline: none; }
+    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; }
     .btn-cap { background: linear-gradient(135deg, #668EF0, #426fe4); box-shadow: 0 10px 20px rgba(102,142,240,0.3); }
     .btn-up { background: linear-gradient(135deg, #43C6AC, #2BB594); box-shadow: 0 10px 20px rgba(43,181,148,0.3); }
     .btn-act span.sub { font-size: 0.78rem; font-weight: 500; opacity: 0.9; }
@@ -324,14 +307,7 @@ app.get('/', (req, res) => {
     .input { width:100%; padding:14px; margin:8px 0 14px; border-radius:14px; border:1px solid #d1d5db; font-size:0.95rem; outline:none; }
     .btn-sub { width:100%; padding:14px; background:var(--primary); color:#fff; border:none; border-radius:14px; font-weight:800; cursor:pointer; font-size:1rem; }
 
-    /* Live Camera Screen */
-    #cameraOverlay { display:none; position:fixed; inset:0; background:#000; z-index:10001; flex-direction:column; justify-content:space-between; }
-    #cameraVideo { width:100%; height:75vh; object-fit:cover; }
-    .cam-ctrls { height:25vh; background:#111; display:flex; justify-content:space-around; align-items:center; padding:0 24px; }
-    .shutter-btn { width:74px; height:74px; border-radius:50%; background:#fff; border:6px solid rgba(255,255,255,0.3); display:flex; align-items:center; justify-content:center; cursor:pointer; }
-    .shutter-core { width:52px; height:52px; border-radius:50%; background:var(--primary); }
-
-    /* Scanner Filter Strip */
+    /* Auto Scan Filter Strip */
     .filter-bar { display:flex; gap:8px; overflow-x:auto; margin:10px 0; padding:4px 0; }
     .f-btn { padding:6px 14px; border-radius:12px; font-size:0.75rem; font-weight:700; background:#f0f2f5; border:none; cursor:pointer; white-space:nowrap; }
     .f-btn.active { background:var(--primary); color:#fff; }
@@ -349,21 +325,21 @@ app.get('/', (req, res) => {
     </div>
   </header>
 
-  <!-- Hero Capture / Upload -->
+  <!-- NATIVE LABEL BINDINGS: Opens Camera & File Picker instantly on Chrome, Android & iOS -->
   <div class="actions">
-    <button class="btn-act btn-cap" onclick="initiateCapture()">
+    <label class="btn-act btn-cap" for="nativeCameraInput">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
-      <span class="sub">Scan Bills & Vouchers</span>
-    </button>
-    <label class="btn-act btn-up" for="filePickerInput">
+      <span class="sub">Take Photo Voucher</span>
+      <input type="file" id="nativeCameraInput" accept="image/*" capture="environment" style="display:none;" onchange="handleFilePicked(this)">
+    </label>
+    <label class="btn-act btn-up" for="nativeUploadInput">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
-      <span class="sub">Gallery Photos & PDFs</span>
-      <input type="file" id="filePickerInput" accept="image/*,application/pdf" style="display:none;" onchange="handleFilePicked(this)">
+      <span class="sub">Gallery & PDFs</span>
+      <input type="file" id="nativeUploadInput" accept="image/*,application/pdf" style="display:none;" onchange="handleFilePicked(this)">
     </label>
   </div>
-  <input type="file" id="fallbackCameraInput" accept="image/*" capture="environment" style="display:none;" onchange="handleFilePicked(this)">
 
   <!-- Directory Section -->
   <div class="sec-header">
@@ -378,34 +354,24 @@ app.get('/', (req, res) => {
   </div>
   <div id="docsContainer"><div class="doc-item">Fetching documents...</div></div>
 
-  <!-- LIVE CAMERA VIEWFINDER OVERLAY -->
-  <div id="cameraOverlay">
-    <video id="cameraVideo" autoplay playsinline></video>
-    <div class="cam-ctrls">
-      <div class="icon-bubble" onclick="stopCamera()"><i class="fa-solid fa-xmark"></i></div>
-      <div class="shutter-btn" onclick="captureLiveFrame()"><div class="shutter-core"></div></div>
-      <div class="icon-bubble" onclick="flipCamera()"><i class="fa-solid fa-camera-rotate"></i></div>
-    </div>
-  </div>
-
   <!-- AUTO-SCAN & FILING MODAL -->
   <div class="modal" id="filingModal">
     <div class="modal-box">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
         <h3 style="font-weight:800;">Review & File Document</h3>
-        <button onclick="retakeCurrent()" style="border:none; background:#f0f2f5; padding:6px 12px; border-radius:10px; font-weight:700; font-size:0.8rem; cursor:pointer;">Retake</button>
+        <button onclick="closeModal('filingModal')" style="border:none; background:#f0f2f5; padding:6px 12px; border-radius:10px; font-weight:700; font-size:0.8rem; cursor:pointer;">Cancel</button>
       </div>
 
-      <div style="text-align:center; margin-bottom:8px; background:#000; border-radius:14px; overflow:hidden; min-height:180px; display:flex; align-items:center; justify-content:center;">
-        <canvas id="previewCanvas" style="max-height:220px; max-width:100%; object-fit:contain;"></canvas>
+      <div style="text-align:center; margin-bottom:8px; background:#000; border-radius:14px; overflow:hidden; min-height:160px; display:flex; align-items:center; justify-content:center;">
+        <canvas id="previewCanvas" style="max-height:200px; max-width:100%; object-fit:contain;"></canvas>
       </div>
 
       <!-- Auto Scan Readability Controls -->
       <div class="filter-bar">
-        <button class="f-btn active" onclick="setFilter('original')">Keep Original</button>
-        <button class="f-btn" onclick="setFilter('enhance')">Auto Scan (Enhanced)</button>
+        <button class="f-btn active" onclick="setFilter('original')">Original</button>
+        <button class="f-btn" onclick="setFilter('enhance')">Enhance</button>
         <button class="f-btn" onclick="setFilter('grayscale')">Grayscale</button>
-        <button class="f-btn" onclick="setFilter('bw')">High Contrast B&W</button>
+        <button class="f-btn" onclick="setFilter('bw')">High Contrast</button>
         <button class="f-btn" onclick="rotatePreview()"><i class="fa-solid fa-rotate-right"></i> Rotate</button>
       </div>
 
@@ -425,7 +391,6 @@ app.get('/', (req, res) => {
         <button class="btn-sub" style="background:#7B8498; flex:1;" onclick="submitFiling(true)">Save to Inbox</button>
         <button class="btn-sub" style="flex:1;" onclick="submitFiling(false)">Save to Folder</button>
       </div>
-      <button style="width:100%; padding:10px; background:none; border:none; color:var(--muted); cursor:pointer; margin-top:4px; font-weight:700;" onclick="closeModal('filingModal')">Cancel</button>
     </div>
   </div>
 
@@ -434,7 +399,7 @@ app.get('/', (req, res) => {
     <div class="modal-box">
       <div style="text-align:center; margin-bottom:12px;"><i class="fa-solid fa-lock" style="font-size:2.2rem; color:var(--primary);"></i></div>
       <h3 style="font-weight:800; text-align:center; margin-bottom:6px;">Protected Document</h3>
-      <p style="font-size:0.82rem; color:var(--muted); text-align:center; margin-bottom:16px;">Enter the view password to inspect this document.</p>
+      <p style="font-size:0.82rem; color:var(--muted); text-align:center; margin-bottom:16px;">Enter the view password to view this document.</p>
       <input type="password" id="viewPwdInput" class="input" placeholder="Enter View Password" autocomplete="off">
       <button class="btn-sub" onclick="confirmPasswordView()">Unlock Document</button>
       <div id="pwdError" style="color:red; font-size:0.82rem; margin-top:8px; text-align:center; font-weight:600;"></div>
@@ -460,10 +425,7 @@ app.get('/', (req, res) => {
     let rawImage = new Image();
     let currentFilter = 'original';
     let currentRotation = 0;
-    let cameraStream = null;
-    let facingMode = 'environment';
     let selectedDocIdToView = null;
-    let preparedMime = 'image/jpeg';
     let isViewingInbox = false;
 
     function showToast(msg, type = 'info') {
@@ -485,54 +447,7 @@ app.get('/', (req, res) => {
       if (type !== 'info') setTimeout(() => toast.classList.remove('show'), 3500);
     }
 
-    // Camera Capture Workflow (Section 6 of Master Prompt)
-    async function initiateCapture() {
-      try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error('Camera API unavailable');
-        }
-        document.getElementById('cameraOverlay').style.display = 'flex';
-        if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
-        cameraStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: facingMode, width: { ideal: 1280 } },
-          audio: false
-        });
-        document.getElementById('cameraVideo').srcObject = cameraStream;
-      } catch (err) {
-        // Fallback to native camera input
-        document.getElementById('cameraOverlay').style.display = 'none';
-        document.getElementById('fallbackCameraInput').click();
-      }
-    }
-
-    function flipCamera() {
-      facingMode = facingMode === 'environment' ? 'user' : 'environment';
-      initiateCapture();
-    }
-
-    function stopCamera() {
-      if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
-      document.getElementById('cameraOverlay').style.display = 'none';
-    }
-
-    function captureLiveFrame() {
-      const video = document.getElementById('cameraVideo');
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 1000;
-      canvas.height = video.videoHeight || 750;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      stopCamera();
-      rawImage.onload = () => {
-        currentFilter = 'original';
-        currentRotation = 0;
-        document.getElementById('filingModal').style.display = 'flex';
-        renderCanvas();
-      };
-      rawImage.src = canvas.toDataURL('image/jpeg', 0.85);
-    }
-
+    // Direct Native File Picker Handler
     function handleFilePicked(input) {
       const file = input.files && input.files[0];
       if (!file) return;
@@ -550,7 +465,7 @@ app.get('/', (req, res) => {
         };
         reader.readAsDataURL(file);
       } else {
-        // PDF document direct upload
+        // Direct PDF upload
         const reader = new FileReader();
         reader.onload = (e) => {
           uploadDirectBase64(e.target.result, file.type || 'application/pdf');
@@ -613,15 +528,10 @@ app.get('/', (req, res) => {
       renderCanvas();
     }
 
-    function retakeCurrent() {
-      closeModal('filingModal');
-      initiateCapture();
-    }
-
     // Submit Document Filing
     async function submitFiling(isInbox = false) {
       const canvas = document.getElementById('previewCanvas');
-      const base64Data = canvas.toDataURL('image/jpeg', 0.72);
+      const base64Data = canvas.toDataURL('image/jpeg', 0.65);
       closeModal('filingModal');
       await uploadDirectBase64(base64Data, 'image/jpeg', isInbox);
     }
