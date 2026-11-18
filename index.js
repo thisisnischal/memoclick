@@ -1,5 +1,5 @@
 /**
- * MEMOCLICK - PUBLIC CLIENT, SCANNER & DIRECTORY FILING SYSTEM
+ * MEMOCLICK - PUBLIC CLIENT & FILING SYSTEM
  * File: index.js
  */
 'use strict';
@@ -59,10 +59,10 @@ const Category = mongoose.models.Category || mongoose.model('Category', Category
 const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
 const Document = mongoose.models.Document || mongoose.model('Document', DocumentSchema);
 
-// Safe Connection Pool
+// Safe Database Connection
 async function ensureDb() {
   if (mongoose.connection.readyState === 1) return;
-  if (!MONGODB_URI) throw new Error('MONGODB_URI is missing');
+  if (!MONGODB_URI) throw new Error('MONGODB_URI is not set');
   await mongoose.connect(MONGODB_URI, { maxPoolSize: 10, serverSelectionTimeoutMS: 5000 });
 }
 
@@ -93,9 +93,7 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// ==========================================
-// REST APIS
-// ==========================================
+// APIs
 app.get('/api/businesses', async (req, res) => {
   try {
     let list = await Business.find({ isActive: true });
@@ -160,11 +158,11 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
-// Upload Document (Initial Save)
+// Upload Document Endpoint
 app.post('/api/documents/upload', async (req, res) => {
   try {
     const { fileBase64, mimeType, partyName } = req.body;
-    if (!fileBase64) return res.status(400).json({ error: 'No file received' });
+    if (!fileBase64) return res.status(400).json({ error: 'No image or file data received' });
 
     const currentYear = '2082';
     const randCode = Math.floor(100000 + Math.random() * 900000);
@@ -185,7 +183,7 @@ app.post('/api/documents/upload', async (req, res) => {
   }
 });
 
-// Move Document to Destination Folder
+// Move Document to Selected Destination Folder
 app.post('/api/documents/:id/organize', async (req, res) => {
   try {
     const { businessId, fiscalYearId, categoryId, isUncategorized } = req.body;
@@ -211,7 +209,7 @@ app.post('/api/documents/:id/organize', async (req, res) => {
   }
 });
 
-// View Document with Password Protection
+// Password Protected View Verification
 app.post('/api/documents/:id/view', async (req, res) => {
   try {
     const { password } = req.body;
@@ -242,7 +240,7 @@ app.post('/api/documents/:id/view', async (req, res) => {
 });
 
 // ==========================================
-// USER INTERFACE (CLAYMORPHISM)
+// USER INTERFACE (HTML/CSS/JS)
 // ==========================================
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -252,27 +250,24 @@ app.get('/', (req, res) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>MemoClick – Document Filing</title>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
     :root {
-      --primary: #668EF0;
+      --primary: #007aff;
       --soft-blue: #E5EEFF;
       --mint: #C9EBDD;
-      --lavender: #E9E0FF;
-      --peach: #FFE3D3;
-      --yellow: #FFF0C7;
       --bg: #F4F6FB;
       --card: #FFFFFF;
-      --text: #283247;
-      --muted: #7B8498;
+      --text: #1e293b;
+      --muted: #64748b;
       --clay-shadow: 6px 6px 14px #d8dfea, -6px -6px 14px #ffffff;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
     body { background: var(--bg); color: var(--text); padding-bottom: 90px; }
     header { padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; position: sticky; top:0; background:rgba(244,246,251,0.92); backdrop-filter:blur(8px); z-index:100; }
-    .brand { font-size: 1.4rem; font-weight: 800; color: var(--primary); display: flex; align-items: center; gap: 8px; }
-    .icon-bubble { width: 42px; height: 42px; border-radius: 50%; background: #fff; box-shadow: var(--clay-shadow); display: flex; align-items: center; justify-content: center; color: var(--primary); text-decoration: none; font-size: 1.15rem; cursor: pointer; }
+    .brand { font-size: 1.4rem; font-weight: 800; color: #668EF0; display: flex; align-items: center; gap: 8px; }
+    .icon-bubble { width: 42px; height: 42px; border-radius: 50%; background: #fff; box-shadow: var(--clay-shadow); display: flex; align-items: center; justify-content: center; color: #668EF0; text-decoration: none; font-size: 1.15rem; cursor: pointer; }
 
     /* Action Buttons */
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
@@ -294,22 +289,39 @@ app.get('/', (req, res) => {
     .doc-sub { font-size: 0.8rem; color: var(--muted); margin-top: 3px; }
 
     /* Modals */
-    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.68); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(5px); }
-    .modal-box { background:#fff; padding:24px; border-radius:26px; width:92%; max-width:440px; max-height:90vh; overflow-y:auto; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
+    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(5px); }
+    .modal-box { background:#fff; padding:24px; border-radius:26px; width:92%; max-width:440px; max-height:90vh; overflow-y:auto; box-shadow: 0 20px 40px rgba(0,0,0,0.25); }
     .input { width:100%; padding:14px; margin:8px 0 14px; border-radius:14px; border:1px solid #d1d5db; font-size:0.95rem; outline:none; }
-    .btn-primary { width:100%; padding:15px; background:var(--primary); color:#fff; border:none; border-radius:14px; font-weight:800; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; gap:8px; }
-    .btn-secondary { width:100%; padding:13px; background:#f0f2f5; color:var(--text); border:none; border-radius:14px; font-weight:700; cursor:pointer; font-size:0.95rem; margin-top:8px; }
+    .btn-primary { width:100%; padding:15px; background:#007aff; color:#fff; border:none; border-radius:14px; font-weight:800; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; gap:8px; }
+    .btn-secondary { width:100%; padding:13px; background:#f1f5f9; color:var(--text); border:none; border-radius:14px; font-weight:700; cursor:pointer; font-size:0.95rem; margin-top:8px; }
 
-    /* Filter strip */
-    .filter-bar { display:flex; gap:8px; overflow-x:auto; margin:12px 0; padding:4px 0; }
-    .f-btn { padding:7px 14px; border-radius:12px; font-size:0.75rem; font-weight:700; background:#f0f2f5; border:none; cursor:pointer; white-space:nowrap; }
-    .f-btn.active { background:var(--primary); color:#fff; }
+    /* WHATSAPP-STYLE MEDIA PREVIEW (Exact match to screenshot) */
+    #whatsappPreviewModal { display:none; position:fixed; inset:0; background:#0b141a; z-index:10001; flex-direction:column; justify-content:space-between; }
+    .wa-top-bar { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; background:rgba(11,20,26,0.95); color:#e9edef; }
+    .wa-top-left { display:flex; align-items:center; gap:12px; font-weight:700; font-size:1.1rem; }
+    .wa-top-actions { display:flex; align-items:center; gap:20px; }
+    .wa-icon-btn { font-size:1.25rem; cursor:pointer; color:#e9edef; border:none; background:none; }
+    .wa-crop-btn { color:#ff6b22; font-size:1.35rem; }
+    .wa-trash-btn { color:#ff3b30; font-size:1.35rem; }
+    .wa-send-btn { color:#007aff; font-weight:800; font-size:1.05rem; cursor:pointer; background:none; border:none; }
+    
+    .wa-preview-area { flex:1; display:flex; align-items:center; justify-content:center; padding:10px; overflow:hidden; }
+    #waPreviewImg { max-width:100%; max-height:70vh; object-fit:contain; border-radius:8px; }
+
+    .wa-bottom-bar { padding:14px 18px; background:rgba(11,20,26,0.95); display:flex; gap:10px; align-items:center; }
+    .wa-caption-input { flex:1; padding:12px 18px; border-radius:24px; border:1px solid #374248; background:#202c33; color:#fff; font-size:0.95rem; outline:none; }
+    .wa-float-send { width:46px; height:46px; border-radius:50%; background:#007aff; color:#fff; border:none; display:flex; align-items:center; justify-content:center; font-size:1.15rem; cursor:pointer; flex-shrink:0; }
+
+    /* Crop / Scanner Toggle Strip */
+    .scan-strip { display:none; background:#202c33; padding:10px 14px; gap:8px; overflow-x:auto; }
+    .scan-opt-btn { padding:6px 14px; border-radius:12px; font-size:0.75rem; font-weight:700; background:#374248; color:#fff; border:none; cursor:pointer; white-space:nowrap; }
+    .scan-opt-btn.active { background:#007aff; }
 
     /* Toast */
     #statusToast {
       position: fixed; top: 16px; left: 50%; transform: translateX(-50%) translateY(-100px);
       background: #283247; color: #fff; padding: 14px 24px; border-radius: 30px; font-weight: 700;
-      font-size: 0.9rem; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.25); display: flex;
+      font-size: 0.9rem; z-index: 20000; box-shadow: 0 10px 30px rgba(0,0,0,0.25); display: flex;
       align-items: center; gap: 10px; transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
     #statusToast.show { transform: translateX(-50%) translateY(0); }
@@ -317,7 +329,7 @@ app.get('/', (req, res) => {
     #statusToast.error { background: #EF4444; }
 
     /* Uploading Spinner */
-    .spinner-ring { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary); border-radius: 50%; width: 44px; height: 44px; animation: spin 0.9s linear infinite; margin: 0 auto 14px; }
+    .spinner-ring { border: 4px solid #f3f3f3; border-top: 4px solid #007aff; border-radius: 50%; width: 44px; height: 44px; animation: spin 0.9s linear infinite; margin: 0 auto 14px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
@@ -331,19 +343,19 @@ app.get('/', (req, res) => {
     </div>
   </header>
 
-  <!-- CAPTURE & UPLOAD BUTTONS -->
+  <!-- ACTIONS -->
   <div class="actions">
-    <label class="btn-act btn-cap" for="camPicker">
+    <label class="btn-act btn-cap" for="camInput">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
-      <input type="file" id="camPicker" accept="image/*" capture="environment" style="display:none;" onchange="handleFilePicked(this)">
+      <input type="file" id="camInput" accept="image/*" capture="environment" style="display:none;" onchange="handleIncomingFile(this)">
     </label>
-    <label class="btn-act btn-up" for="filePicker">
+    <label class="btn-act btn-up" for="filePickerInput">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
       <span class="sub">Gallery & PDFs</span>
-      <input type="file" id="filePicker" accept="image/*,application/pdf" style="display:none;" onchange="handleFilePicked(this)">
+      <input type="file" id="filePickerInput" accept="image/*,application/pdf" style="display:none;" onchange="handleIncomingFile(this)">
     </label>
   </div>
 
@@ -360,70 +372,77 @@ app.get('/', (req, res) => {
   </div>
   <div id="docsContainer"><div class="doc-item">Fetching documents...</div></div>
 
-  <!-- STEP 1: REVIEW & AUTO-SCAN / CROP MODAL -->
-  <div class="modal" id="reviewModal">
-    <div class="modal-box">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-        <h3 style="font-weight:800;">Review & Scan</h3>
-        <button onclick="closeModal('reviewModal')" style="border:none; background:#f0f2f5; padding:6px 12px; border-radius:10px; font-weight:700; cursor:pointer;">Cancel</button>
+  <!-- 1. WHATSAPP STYLE REVIEW PREVIEW MODAL -->
+  <div id="whatsappPreviewModal">
+    <!-- Top Bar (Matching Screenshot) -->
+    <div class="wa-top-bar">
+      <div class="wa-top-left">
+        <i class="fa-regular fa-image" style="font-size:1.3rem;"></i>
+        <span>Image preview</span>
       </div>
-
-      <div style="text-align:center; background:#000; border-radius:16px; overflow:hidden; min-height:160px; display:flex; align-items:center; justify-content:center;">
-        <canvas id="previewCanvas" style="max-height:210px; max-width:100%; object-fit:contain;"></canvas>
+      <div class="wa-top-actions">
+        <button class="wa-icon-btn wa-crop-btn" title="Crop & Scan Options" onclick="toggleScanStrip()"><i class="fa-solid fa-crop-simple"></i></button>
+        <button class="wa-icon-btn wa-trash-btn" title="Discard" onclick="discardPreview()"><i class="fa-regular fa-trash-can"></i></button>
+        <button class="wa-send-btn" onclick="executeUpload()">Send</button>
       </div>
+    </div>
 
-      <!-- Auto Scan / Crop Controls -->
-      <div class="filter-bar">
-        <button class="f-btn active" onclick="setFilter('original')">Original</button>
-        <button class="f-btn" onclick="setFilter('enhance')">Auto Scan</button>
-        <button class="f-btn" onclick="setFilter('crop')">Auto-Crop</button>
-        <button class="f-btn" onclick="setFilter('grayscale')">Grayscale</button>
-        <button class="f-btn" onclick="setFilter('bw')">High Contrast</button>
-        <button class="f-btn" onclick="rotatePreview()"><i class="fa-solid fa-rotate-right"></i> Rotate</button>
-      </div>
+    <!-- Scanner / Filter Strip (Toggled by Crop icon) -->
+    <div class="scan-strip" id="scanStrip">
+      <button class="scan-opt-btn active" onclick="applyFilter('original')">Original</button>
+      <button class="scan-opt-btn" onclick="applyFilter('enhance')">Auto-Scan</button>
+      <button class="scan-opt-btn" onclick="applyFilter('crop')">Crop Border</button>
+      <button class="scan-opt-btn" onclick="applyFilter('grayscale')">Grayscale</button>
+      <button class="scan-opt-btn" onclick="applyFilter('bw')">High Contrast</button>
+      <button class="scan-opt-btn" onclick="rotatePreview()"><i class="fa-solid fa-rotate-right"></i> Rotate</button>
+    </div>
 
-      <label style="font-size:0.8rem; font-weight:700;">Party / Supplier Name (Optional)</label>
-      <input type="text" id="partyNameInput" class="input" placeholder="e.g. Pokhara Traders">
+    <!-- Center Preview Area -->
+    <div class="wa-preview-area">
+      <img id="waPreviewImg" src="" alt="Preview">
+      <canvas id="hiddenCanvas" style="display:none;"></canvas>
+    </div>
 
-      <button class="btn-primary" onclick="startUpload()">
-        <i class="fa-solid fa-cloud-arrow-up"></i> Upload Document
-      </button>
+    <!-- Bottom Caption Bar (Matching Screenshot) -->
+    <div class="wa-bottom-bar">
+      <input type="text" id="waCaptionInput" class="wa-caption-input" placeholder="Add a caption / Party name..." autocomplete="off">
+      <button class="wa-float-send" title="Upload" onclick="executeUpload()"><i class="fa-solid fa-paper-plane"></i></button>
     </div>
   </div>
 
-  <!-- STEP 2: UPLOADING ANIMATION MODAL -->
+  <!-- 2. UPLOADING ANIMATION MODAL -->
   <div class="modal" id="uploadingModal">
     <div class="modal-box" style="text-align:center; padding:36px 24px;">
       <div class="spinner-ring"></div>
       <h3 style="font-weight:800; margin-bottom:6px;">Uploading Document</h3>
-      <p style="font-size:0.85rem; color:var(--muted);">Securing and saving to cloud database...</p>
+      <p style="font-size:0.85rem; color:var(--muted);">Compressing & saving to database...</p>
     </div>
   </div>
 
-  <!-- STEP 3: DESTINATION FOLDER SELECTION ("MOVE HERE" OR "UNCATEGORIZED") -->
+  <!-- 3. DESTINATION FOLDER MODAL ("MOVE HERE" OR "UNCATEGORIZED") -->
   <div class="modal" id="destinationModal">
     <div class="modal-box">
       <div style="text-align:center; margin-bottom:14px;">
         <div style="width:52px; height:52px; background:var(--mint); color:#10B981; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:1.6rem; margin-bottom:8px;">
           <i class="fa-solid fa-check"></i>
         </div>
-        <h3 style="font-weight:800;">Upload Successful!</h3>
+        <h3 style="font-weight:800;">Upload Complete!</h3>
         <p style="font-size:0.82rem; color:var(--muted);">Choose destination folder or save as uncategorized.</p>
       </div>
 
       <!-- Folder Navigation Tree Selection -->
       <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:18px; padding:16px; margin-bottom:16px;">
-        <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-building"></i> Select Business</label>
+        <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-building"></i> Destination Business</label>
         <select id="destBiz" class="input" style="background:#fff;"></select>
 
-        <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-calendar"></i> Select Fiscal Year</label>
+        <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-calendar"></i> Nepal Fiscal Year</label>
         <select id="destFY" class="input" style="background:#fff;"></select>
 
         <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-folder"></i> Destination Directory Folder</label>
         <select id="destCat" class="input" style="background:#fff;"></select>
       </div>
 
-      <!-- Big "Move Here" Action Button -->
+      <!-- Prominent "Move Here" Action Button -->
       <button class="btn-primary" onclick="confirmMoveToFolder()">
         <i class="fa-solid fa-folder-open"></i> Move Here
       </button>
@@ -438,7 +457,7 @@ app.get('/', (req, res) => {
   <!-- PASSWORD PROMPT MODAL -->
   <div class="modal" id="pwdModal">
     <div class="modal-box">
-      <div style="text-align:center; margin-bottom:12px;"><i class="fa-solid fa-lock" style="font-size:2.2rem; color:var(--primary);"></i></div>
+      <div style="text-align:center; margin-bottom:12px;"><i class="fa-solid fa-lock" style="font-size:2.2rem; color:#007aff;"></i></div>
       <h3 style="font-weight:800; text-align:center; margin-bottom:6px;">Protected Document</h3>
       <p style="font-size:0.82rem; color:var(--muted); text-align:center; margin-bottom:16px;">Enter view password to view this file.</p>
       <input type="password" id="viewPwdInput" class="input" placeholder="Enter View Password" autocomplete="off">
@@ -463,11 +482,11 @@ app.get('/', (req, res) => {
   </div>
 
   <script>
-    let rawImage = new Image();
-    let currentFilter = 'original';
+    let currentRawBase64 = null;
+    let processedBase64 = null;
+    let currentMimeType = 'image/jpeg';
     let currentRotation = 0;
-    let preparedBase64 = null;
-    let preparedMime = 'image/jpeg';
+    let activeFilter = 'original';
     let latestUploadedDocId = null;
     let selectedDocIdToView = null;
 
@@ -490,137 +509,131 @@ app.get('/', (req, res) => {
       if (type !== 'info') setTimeout(() => toast.classList.remove('show'), 3500);
     }
 
-    // Step 1: File Picked
-    function handleFilePicked(input) {
+    // Handle Captured Photo or Picked File
+    function handleIncomingFile(input) {
       const file = input.files && input.files[0];
       if (!file) return;
 
-      if (file.type && file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          rawImage.onload = () => {
-            currentFilter = 'original';
-            currentRotation = 0;
-            document.getElementById('reviewModal').style.display = 'flex';
-            renderCanvas();
-          };
-          rawImage.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-      } else {
-        // Direct PDF selection
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          preparedBase64 = e.target.result;
-          preparedMime = file.type || 'application/pdf';
-          uploadDirectPayload();
-        };
-        reader.readAsDataURL(file);
-      }
+      currentMimeType = file.type || 'image/jpeg';
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        currentRawBase64 = e.target.result;
+        processedBase64 = e.target.result;
+        currentRotation = 0;
+        activeFilter = 'original';
+
+        document.getElementById('waPreviewImg').src = currentRawBase64;
+        document.getElementById('waCaptionInput').value = '';
+        document.getElementById('scanStrip').style.display = 'none';
+        document.getElementById('whatsappPreviewModal').style.display = 'flex';
+      };
+      reader.readAsDataURL(file);
       input.value = '';
     }
 
-    // Step 2: Render Canvas with Auto-Scan / Filters / Crop
-    function renderCanvas() {
-      const canvas = document.getElementById('previewCanvas');
-      const ctx = canvas.getContext('2d');
-
-      let sw = rawImage.width;
-      let sh = rawImage.height;
-      let sx = 0, sy = 0;
-
-      // Auto-Crop (10% edge border cleanup)
-      if (currentFilter === 'crop') {
-        sx = Math.round(sw * 0.05);
-        sy = Math.round(sh * 0.05);
-        sw = Math.round(sw * 0.9);
-        sh = Math.round(sh * 0.9);
-      }
-
-      const isSideways = currentRotation === 90 || currentRotation === 270;
-      canvas.width = isSideways ? sh : sw;
-      canvas.height = isSideways ? sw : sh;
-
-      ctx.save();
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((currentRotation * Math.PI) / 180);
-      ctx.drawImage(rawImage, sx, sy, sw, sh, -sw / 2, -sh / 2, sw, sh);
-      ctx.restore();
-
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const d = imgData.data;
-
-      if (currentFilter === 'grayscale') {
-        for (let i = 0; i < d.length; i += 4) {
-          const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-          d[i] = d[i + 1] = d[i + 2] = v;
-        }
-        ctx.putImageData(imgData, 0, 0);
-      } else if (currentFilter === 'bw') {
-        for (let i = 0; i < d.length; i += 4) {
-          const v = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) > 130 ? 255 : 0;
-          d[i] = d[i + 1] = d[i + 2] = v;
-        }
-        ctx.putImageData(imgData, 0, 0);
-      } else if (currentFilter === 'enhance') {
-        const factor = (259 * (45 + 255)) / (255 * (259 - 45));
-        for (let i = 0; i < d.length; i += 4) {
-          d[i] = factor * (d[i] - 128) + 128;
-          d[i + 1] = factor * (d[i + 1] - 128) + 128;
-          d[i + 2] = factor * (d[i + 2] - 128) + 128;
-        }
-        ctx.putImageData(imgData, 0, 0);
-      }
+    function toggleScanStrip() {
+      const strip = document.getElementById('scanStrip');
+      strip.style.display = strip.style.display === 'flex' ? 'none' : 'flex';
     }
 
-    function setFilter(f) {
-      currentFilter = f;
-      document.querySelectorAll('.f-btn').forEach(b => b.classList.remove('active'));
+    function discardPreview() {
+      document.getElementById('whatsappPreviewModal').style.display = 'none';
+      currentRawBase64 = null;
+      processedBase64 = null;
+    }
+
+    // Canvas Filters / Auto-Scan Engine
+    function applyFilter(mode) {
+      activeFilter = mode;
+      document.querySelectorAll('.scan-opt-btn').forEach(b => b.classList.remove('active'));
       event.target.classList.add('active');
-      renderCanvas();
+      renderProcessedImage();
     }
 
     function rotatePreview() {
       currentRotation = (currentRotation + 90) % 360;
-      renderCanvas();
+      renderProcessedImage();
     }
 
-    // Step 3: Trigger Upload with Animation
-    function startUpload() {
-      const canvas = document.getElementById('previewCanvas');
-      // Downscale to max 850px for fast, guaranteed ~80KB upload
-      const tempCanvas = document.createElement('canvas');
-      let w = canvas.width;
-      let h = canvas.height;
-      const maxDim = 850;
-      if (w > maxDim || h > maxDim) {
-        if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-        else { w = Math.round((w * maxDim) / h); h = maxDim; }
-      }
-      tempCanvas.width = w;
-      tempCanvas.height = h;
-      tempCanvas.getContext('2d').drawImage(canvas, 0, 0, w, h);
+    function renderProcessedImage() {
+      const img = new Image();
+      img.onload = function() {
+        const canvas = document.getElementById('hiddenCanvas');
+        const ctx = canvas.getContext('2d');
 
-      preparedBase64 = tempCanvas.toDataURL('image/jpeg', 0.68);
-      preparedMime = 'image/jpeg';
-      closeModal('reviewModal');
+        let sw = img.width;
+        let sh = img.height;
+        let sx = 0, sy = 0;
 
-      uploadDirectPayload();
+        if (activeFilter === 'crop') {
+          sx = Math.round(sw * 0.05);
+          sy = Math.round(sh * 0.05);
+          sw = Math.round(sw * 0.9);
+          sh = Math.round(sh * 0.9);
+        }
+
+        const isSideways = currentRotation === 90 || currentRotation === 270;
+        canvas.width = isSideways ? sh : sw;
+        canvas.height = isSideways ? sw : sh;
+
+        ctx.save();
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((currentRotation * Math.PI) / 180);
+        ctx.drawImage(img, sx, sy, sw, sh, -sw / 2, -sh / 2, sw, sh);
+        ctx.restore();
+
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = imgData.data;
+
+        if (activeFilter === 'grayscale') {
+          for (let i = 0; i < d.length; i += 4) {
+            const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            d[i] = d[i + 1] = d[i + 2] = v;
+          }
+          ctx.putImageData(imgData, 0, 0);
+        } else if (activeFilter === 'bw') {
+          for (let i = 0; i < d.length; i += 4) {
+            const v = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) > 130 ? 255 : 0;
+            d[i] = d[i + 1] = d[i + 2] = v;
+          }
+          ctx.putImageData(imgData, 0, 0);
+        } else if (activeFilter === 'enhance') {
+          const factor = (259 * (45 + 255)) / (255 * (259 - 45));
+          for (let i = 0; i < d.length; i += 4) {
+            d[i] = factor * (d[i] - 128) + 128;
+            d[i + 1] = factor * (d[i + 1] - 128) + 128;
+            d[i + 2] = factor * (d[i + 2] - 128) + 128;
+          }
+          ctx.putImageData(imgData, 0, 0);
+        }
+
+        processedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+        document.getElementById('waPreviewImg').src = processedBase64;
+      };
+      img.src = currentRawBase64;
     }
 
-    // Step 4: Uploading Animation & Cloud Post
-    async function uploadDirectPayload() {
-      // Show Uploading Animation Modal
+    // Step 3 & 4: Upload Execution with Animation
+    async function executeUpload() {
+      if (!processedBase64) return;
+
+      const caption = document.getElementById('waCaptionInput').value.trim();
+
+      // Close preview and show animated uploading screen
+      document.getElementById('whatsappPreviewModal').style.display = 'none';
       document.getElementById('uploadingModal').style.display = 'flex';
+
+      // Downscale to max 850px for fast, reliable upload under Vercel limits
+      const uploadPayload = await getDownscaledPayload(processedBase64);
 
       try {
         const res = await fetch('/api/documents/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            fileBase64: preparedBase64,
-            mimeType: preparedMime,
-            partyName: document.getElementById('partyNameInput').value
+            fileBase64: uploadPayload,
+            mimeType: currentMimeType,
+            partyName: caption
           })
         });
 
@@ -633,7 +646,7 @@ app.get('/', (req, res) => {
           document.getElementById('destinationModal').style.display = 'flex';
           loadData();
         } else {
-          showToast('Upload error: ' + (data.error || 'Server rejected'), 'error');
+          showToast('Upload error: ' + (data.error || 'Server error'), 'error');
         }
       } catch (err) {
         closeModal('uploadingModal');
@@ -641,7 +654,31 @@ app.get('/', (req, res) => {
       }
     }
 
-    // Step 5A: Confirm Move To Destination Folder ("Move Here")
+    function getDownscaledPayload(base64) {
+      return new Promise((resolve) => {
+        if (!currentMimeType.startsWith('image/')) return resolve(base64);
+
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let w = img.width;
+          let h = img.height;
+          const maxDim = 850;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+            else { w = Math.round((w * maxDim) / h); h = maxDim; }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.68));
+        };
+        img.onerror = () => resolve(base64);
+        img.src = base64;
+      });
+    }
+
+    // Step 5A: Move Here
     async function confirmMoveToFolder() {
       if (!latestUploadedDocId) return;
 
@@ -659,7 +696,7 @@ app.get('/', (req, res) => {
           body: JSON.stringify({ businessId: bizId, fiscalYearId: fyId, categoryId: catId, isUncategorized: false })
         });
         if (res.ok) {
-          showToast('Document moved to folder successfully!', 'success');
+          showToast('Moved to folder successfully!', 'success');
           loadData();
         }
       } catch (e) {
@@ -704,11 +741,11 @@ app.get('/', (req, res) => {
         const catArr = Array.isArray(categories) ? categories : [];
         const docArr = (docs && Array.isArray(docs.documents)) ? docs.documents : [];
 
-        // Render Directory
+        // Directory
         if (bizArr.length > 0) {
           document.getElementById('bizContainer').innerHTML = bizArr.map(b => \`
             <div class="biz-card">
-              <div style="font-weight:700;"><i class="fa-solid fa-folder-open" style="color:var(--primary); margin-right:6px;"></i>\${b.businessName}</div>
+              <div style="font-weight:700;"><i class="fa-solid fa-folder-open" style="color:#007aff; margin-right:6px;"></i>\${b.businessName}</div>
               <div style="font-size:0.8rem; color:var(--muted); margin-top:4px;">\${b.documentCount} Document\${b.documentCount === 1 ? '' : 's'}</div>
             </div>
           \`).join('');
@@ -722,12 +759,12 @@ app.get('/', (req, res) => {
           document.getElementById('destCat').innerHTML = catArr.map(c => \`<option value="\${c._id}">📁 \${c.name}</option>\`).join('');
         }
 
-        // Render Recent Documents
+        // Recent Documents
         if (docArr.length > 0) {
           document.getElementById('docsContainer').innerHTML = docArr.map(d => \`
             <div class="doc-item" onclick="promptView('\${d._id}')">
               <div>
-                <div class="doc-ref"><i class="fa-solid fa-file-lines" style="color:var(--primary); margin-right:6px;"></i>\${d.documentRef}</div>
+                <div class="doc-ref"><i class="fa-solid fa-file-lines" style="color:#007aff; margin-right:6px;"></i>\${d.documentRef}</div>
                 <div class="doc-sub">\${d.businessId?.businessName || (d.isInbox ? 'Uncategorized Inbox' : 'General')} • \${d.categoryId?.name || 'File'} \${d.partyName ? '(' + d.partyName + ')' : ''}</div>
               </div>
               <i class="fa-solid fa-lock" style="color:#c5cbe0;"></i>
