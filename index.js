@@ -373,14 +373,13 @@ app.get('/', (req, res) => {
 
   <!-- ACTIONS -->
   <div class="actions">
-    <!-- Using strictly button type with onclick -->
-    <button type="button" class="btn-act btn-cap" onclick="document.getElementById('directCamInput').click()">
+    <button type="button" id="btnCapture" class="btn-act btn-cap">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
     </button>
 
-    <button type="button" class="btn-act btn-up" onclick="document.getElementById('directUploadInput').click()">
+    <button type="button" id="btnUpload" class="btn-act btn-up">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
       <span class="sub">Gallery & PDFs</span>
@@ -517,6 +516,15 @@ app.get('/', (req, res) => {
   </div>
 
   <script>
+    // 1. Safely attach click listeners
+    document.getElementById('btnCapture').addEventListener('click', function() {
+      document.getElementById('directCamInput').click();
+    });
+
+    document.getElementById('btnUpload').addEventListener('click', function() {
+      document.getElementById('directUploadInput').click();
+    });
+
     let currentRawBase64 = null;
     let processedBase64 = null;
     let currentMimeType = 'image/jpeg';
@@ -564,7 +572,9 @@ app.get('/', (req, res) => {
         currentRawBase64 = e.target.result;
         processedBase64 = e.target.result;
         openPreviewModal();
-        input.value = ''; 
+        
+        // Clear input safely after reading
+        setTimeout(() => { input.value = ''; }, 100);
       };
       reader.readAsDataURL(file);
     }
