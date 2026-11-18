@@ -69,27 +69,25 @@ const Category = mongoose.models.Category || mongoose.model('Category', Category
 const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
 const Document = mongoose.models.Document || mongoose.model('Document', DocumentSchema);
 
-// Connection
-let connPromise = null;
-async function connectDb() {
-  if (mongoose.connection.readyState === 1) return mongoose.connection;
-  if (!connPromise) {
-    if (!MONGODB_URI) throw new Error('MONGODB_URI is missing');
-    connPromise = mongoose.connect(MONGODB_URI, {
-      maxPoolSize: 5,
-      serverSelectionTimeoutMS: 5000,
-      connectTimeoutMS: 5000
-    });
-  }
-  return connPromise;
+// Safe Database Connection
+async function ensureDb() {
+  if (mongoose.connection.readyState === 1) return;
+  if (!MONGODB_URI) throw new Error('MONGODB_URI is missing');
+  await mongoose.connect(MONGODB_URI, {
+    maxPoolSize: 5,
+    serverSelectionTimeoutMS: 5000
+  });
 }
 
 app.use(async (req, res, next) => {
   try {
-    await connectDb();
+    await ensureDb();
     next();
   } catch (err) {
-    res.status(503).json({ error: 'DB connecting: ' + err.message });
+    if (req.path.startsWith('/admin/api/')) {
+      return res.status(503).json({ error: 'DB connecting: ' + err.message });
+    }
+    next();
   }
 });
 
@@ -283,7 +281,7 @@ app.get('*', (req, res) => {
 </head>
 <body>
 
-  <!-- CLEAN ISOLATED LOGIN SCREEN (Nothing else shown before login) -->
+  <!-- CLEAN ISOLATED LOGIN SCREEN (Header is hidden before login) -->
   <div id="loginScreen" style="min-height:80vh; display:flex; align-items:center; justify-content:center;">
     <div class="box" style="width:100%; max-width:420px; margin:0 auto;">
       <div style="text-align:center; margin-bottom:14px;">
@@ -513,3 +511,142 @@ app.get('*', (req, res) => {
 
     async function adminDeleteDoc(id) {
       if (!confirm('Permanently delete this document from filing system?')) return;
+      const token = localStorage.getItem('mc_admin_token');
+      await fetch('/admin/api/documents/' + id, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      initFileManager();
+    }
+
+    function openSettingsModal() { document.getElementById('settingsModal').style.display = 'flex'; }
+    function closeSettingsModal() { document.getElementById('settingsModal').style.display = 'none'; }
+    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+    function populateSettingsLists() {
+      document.getElementById('curViewPass').value = treeData.currentViewPassword;
+      document.getElementById('bizList').innerHTML = treeData.businesses.map(b => \`
+        <div class="item-row">
+          <div><strong>\${b.businessName}</strong></div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn" style="padding:4px 8px; font-size:0.75rem;" onclick="renameBiz('\${b._id}', '\${b.businessName}')">Rename</button>
+            <button class="btn btn-danger" style="padding:4px 8px; font-size:0.75rem;" onclick="deleteBiz('\${b._id}')"><i class="fa-solid fa-trash"></i></button>
+          </div>
+        </div>
+      \`).join('');
+
+      document.getElementById('catList').innerHTML = treeData.categories.map(c => \`
+        <div class="item-row">
+          <div><i class="fa-solid fa-folder" style="color:var(--primary); margin-right:6px;"></i><strong>\${c.name}</strong></div>
+          <button class="btn btn-danger" style="padding:4px 8px; font-size:0.75rem;" onclick="deleteCat('\${c._id}')"><i class="fa-solid fa-trash"></i></button>
+        </div>
+      \`).join('');
+    }
+
+    async function submitLogin() {
+      const email = document.getElementById('adminEmail').value.trim();
+      const password = document.getElementById('adminPassword').value.trim();
+      const msg = document.getElementById('loginMsg');
+      const btn = document.getElementById('signInBtn');
+
+      if (!email || !password) return msg.innerText = 'Enter email and password';
+      msg.innerText = 'Verifying...';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/admin/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.token) {
+          localStorage.setItem('mc_admin_token', data.token);
+          msg.innerText = '';
+          initFileManager();
+        } else {
+          msg.innerText = data.error || 'Incorrect email or password';
+        }
+      } catch (err) {
+        msg.innerText = 'Connection error';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function saveViewPassword() {
+      const password = document.getElementById('curViewPass').value;
+      const token = localStorage.getItem('mc_admin_token');
+      await fetch('/admin/api/view-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ password })
+      });
+      alert('View password updated!');
+      initFileManager();
+    }
+
+    async function openAddBizPrompt() {
+      const name = prompt('Business Name:');
+      if (!name) return;
+      const token = localStorage.getItem('mc_admin_token');
+      await fetch('/admin/api/businesses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ businessName: name })
+      });
+      initFileManager();
+    }
+
+    async function renameBiz(id, oldName) {
+      const name = prompt('Rename Business:', oldName);
+      if (!name) return;
+      const token = localStorage.getItem('mc_admin_token');
+      await fetch('/admin/api/businesses/' + id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ businessName: name })
+      });
+      initFileManager();
+    }
+
+    async function deleteBiz(id) {
+      if (!confirm('Delete this business?')) return;
+      const token = localStorage.getItem('mc_admin_token');
+      await fetch('/admin/api/businesses/' + id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+      initFileManager();
+    }
+
+    async function openAddCatPrompt() {
+      const name = prompt('New Folder Name:');
+      if (!name) return;
+      const token = localStorage.getItem('mc_admin_token');
+      await fetch('/admin/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ name })
+      });
+      initFileManager();
+    }
+
+    async function deleteCat(id) {
+      if (!confirm('Delete this folder?')) return;
+      const token = localStorage.getItem('mc_admin_token');
+      await fetch('/admin/api/categories/' + id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+      initFileManager();
+    }
+
+    function adminLogout() {
+      localStorage.removeItem('mc_admin_token');
+      document.getElementById('loginScreen').style.display = 'flex';
+      document.getElementById('authApp').style.display = 'none';
+      closeSettingsModal();
+    }
+
+    window.addEventListener('DOMContentLoaded', initFileManager);
+  </script>
+</body>
+</html>`);
+});
+
+module.exports = app;
