@@ -514,7 +514,9 @@ app.get('/', (req, res) => {
   </div>
 
   <!-- Direct Native Inputs -->
-  <input type="file" id="directCamInput" accept="image/*" style="display:none;" onchange="handleIncomingFile(this)">
+  <!-- CAPTURE: capture="environment" opens rear camera on mobile, file chooser on PC -->
+  <input type="file" id="directCamInput" accept="image/*" capture="environment" style="display:none;" onchange="handleIncomingFile(this)">
+  <!-- UPLOAD: no capture attribute, opens gallery/file picker (images + PDFs) on all devices -->
   <input type="file" id="directUploadInput" accept="image/*,application/pdf" style="display:none;" onchange="handleIncomingFile(this)">
 
   <script>
@@ -530,7 +532,9 @@ app.get('/', (req, res) => {
 
     function openPicker(type) {
       const el = document.getElementById(type === 'camera' ? 'directCamInput' : 'directUploadInput');
-      if (el) el.click();
+      if (!el) return;
+      el.value = ''; // allow re-selecting the same file
+      el.click();
     }
 
     function showToast(msg, type) {
