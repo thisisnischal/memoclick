@@ -1,5 +1,5 @@
 /**
- * MEMOCLICK - CORE ENGINE & PUBLIC CLIENT INTERFACE
+ * MEMOCLICK - FAST ENGINE & PUBLIC CLIENT INTERFACE
  * File: index.js
  */
 'use strict';
@@ -10,22 +10,13 @@ const mongoose = require('mongoose');
 const helmet = require('helmet');
 const cors = require('cors');
 const multer = require('multer');
-const bcrypt = require('bcryptjs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 
-// Schemas
+// Schemas & Models
 const { Schema } = mongoose;
-
-const UserSchema = new Schema({
-  name: { type: String, required: true },
-  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-  passwordHash: { type: String, required: true },
-  role: { type: String, default: 'Owner' },
-  isActive: { type: Boolean, default: true }
-});
 
 const BusinessSchema = new Schema({
   businessId: { type: String, required: true, unique: true },
@@ -57,84 +48,35 @@ const DocumentSchema = new Schema({
   categoryId: { type: Schema.Types.ObjectId, ref: 'Category', required: true },
   title: { type: String, default: 'Document' },
   partyName: { type: String, default: '' },
-  documentNumber: { type: String, default: '' },
-  fileData: { type: String, required: true }, // Saved directly in MongoDB Atlas
+  fileData: { type: String, required: true },
   fileType: { type: String, default: 'image/jpeg' },
   createdAt: { type: Date, default: Date.now }
 });
 
-const User = mongoose.models.User || mongoose.model('User', UserSchema);
 const Business = mongoose.models.Business || mongoose.model('Business', BusinessSchema);
 const FiscalYear = mongoose.models.FiscalYear || mongoose.model('FiscalYear', FiscalYearSchema);
 const Category = mongoose.models.Category || mongoose.model('Category', CategorySchema);
 const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
 const Document = mongoose.models.Document || mongoose.model('Document', DocumentSchema);
 
-// Connection & Seeding Middleware
-let cachedDb = global.__mongoConn || null;
-let isSeeded = false;
-
-async function ensureDbAndSeed() {
-  if (!cachedDb || mongoose.connection.readyState !== 1) {
+// Fast Cached DB Connection
+let connPromise = null;
+async function connectDb() {
+  if (mongoose.connection.readyState === 1) return mongoose.connection;
+  if (!connPromise) {
     if (!MONGODB_URI) throw new Error('MONGODB_URI is not configured');
-    mongoose.set('strictQuery', true);
-    cachedDb = await mongoose.connect(MONGODB_URI, { maxPoolSize: 10, serverSelectionTimeoutMS: 8000 });
-    global.__mongoConn = cachedDb;
+    connPromise = mongoose.connect(MONGODB_URI, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000
+    });
   }
-
-  if (!isSeeded) {
-    // 1. Seed Owner
-    const adminEmail = (process.env.ADMIN_EMAIL || 'owner@nischal.com').toLowerCase().trim();
-    const owner = await User.findOne({ email: adminEmail });
-    if (!owner) {
-      const defaultPassword = 'MemoClick2082Secure!';
-      const passwordHash = await bcrypt.hash(defaultPassword, 12);
-      await User.create({ name: 'System Owner', email: adminEmail, passwordHash, role: 'Owner' });
-    }
-
-    // 2. Seed Default View Password
-    const viewPass = await Setting.findOne({ key: 'view_password' });
-    if (!viewPass) {
-      await Setting.create({ key: 'view_password', value: process.env.VIEW_PASSWORD || '1234' });
-    }
-
-    // 3. Seed Businesses
-    if ((await Business.countDocuments()) === 0) {
-      await Business.create([
-        { businessId: 'ABC-01', businessName: 'ABC Pvt. Ltd.', panNumber: '600123456' },
-        { businessId: 'DEF-02', businessName: 'DEF Pvt. Ltd.', panNumber: '600789012' }
-      ]);
-    }
-
-    // 4. Seed Fiscal Years
-    if ((await FiscalYear.countDocuments()) === 0) {
-      await FiscalYear.create([
-        { fiscalYear: '2082/83', isCurrent: true },
-        { fiscalYear: '2083/84' },
-        { fiscalYear: '2084/85' }
-      ]);
-    }
-
-    // 5. Seed Categories / Directories
-    if ((await Category.countDocuments()) === 0) {
-      await Category.create([
-        { name: 'Purchase Bills', icon: 'fa-shopping-bag', color: '#27AE60' },
-        { name: 'Sales Bills', icon: 'fa-cash-register', color: '#2F80ED' },
-        { name: 'Debit Notes', icon: 'fa-file-invoice-dollar', color: '#668EF0' },
-        { name: 'Credit Notes', icon: 'fa-receipt', color: '#9B51E0' },
-        { name: 'Tax Documents', icon: 'fa-landmark', color: '#EB5757' },
-        { name: 'Agreements', icon: 'fa-file-contract', color: '#10B981' }
-      ]);
-    }
-
-    isSeeded = true;
-  }
-  return cachedDb;
+  return connPromise;
 }
 
 app.use(async (req, res, next) => {
   try {
-    await ensureDbAndSeed();
+    await connectDb();
     next();
   } catch (err) {
     res.status(503).json({ error: 'Database unavailable: ' + err.message });
@@ -153,49 +95,78 @@ app.use(helmet({
   }
 }));
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true, limit: '15mb' }));
-
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+app.use(express.json({ limit: '12mb' }));
+app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 
 // ==========================================
-// PUBLIC DIRECTORY & FILING APIs
+// PUBLIC APIs
 // ==========================================
 app.get('/api/businesses', async (req, res) => {
-  const businesses = await Business.find({ isActive: true });
-  const counts = await Document.aggregate([{ $group: { _id: '$businessId', count: { $sum: 1 } } }]);
-  const countMap = {};
-  counts.forEach(c => { if (c._id) countMap[c._id.toString()] = c.count; });
-  res.json(businesses.map(b => ({ ...b.toObject(), documentCount: countMap[b._id.toString()] || 0 })));
+  try {
+    let list = await Business.find({ isActive: true });
+    if (list.length === 0) {
+      list = await Business.create([
+        { businessId: 'ABC-01', businessName: 'ABC Pvt. Ltd.', panNumber: '600123456' },
+        { businessId: 'DEF-02', businessName: 'DEF Pvt. Ltd.', panNumber: '600789012' }
+      ]);
+    }
+    const counts = await Document.aggregate([{ $group: { _id: '$businessId', count: { $sum: 1 } } }]);
+    const countMap = {};
+    counts.forEach(c => { if (c._id) countMap[c._id.toString()] = c.count; });
+    res.json(list.map(b => ({ ...b.toObject(), documentCount: countMap[b._id.toString()] || 0 })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/fiscal-years', async (req, res) => {
-  res.json(await FiscalYear.find().sort({ fiscalYear: -1 }));
+  try {
+    let list = await FiscalYear.find().sort({ fiscalYear: -1 });
+    if (list.length === 0) {
+      list = await FiscalYear.create([
+        { fiscalYear: '2082/83', isCurrent: true },
+        { fiscalYear: '2083/84' }
+      ]);
+    }
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/categories', async (req, res) => {
-  res.json(await Category.find());
+  try {
+    let list = await Category.find();
+    if (list.length === 0) {
+      list = await Category.create([
+        { name: 'Purchase Bills', icon: 'fa-shopping-bag', color: '#27AE60' },
+        { name: 'Sales Bills', icon: 'fa-cash-register', color: '#2F80ED' },
+        { name: 'Tax Documents', icon: 'fa-landmark', color: '#EB5757' },
+        { name: 'Other Documents', icon: 'fa-folder-open', color: '#7B8498' }
+      ]);
+    }
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Get document list (excludes raw fileData for fast network load)
 app.get('/api/documents', async (req, res) => {
-  const { businessId, categoryId } = req.query;
-  const filter = {};
-  if (businessId) filter.businessId = businessId;
-  if (categoryId) filter.categoryId = categoryId;
-
-  const docs = await Document.find(filter)
-    .select('-fileData')
-    .populate('businessId', 'businessName')
-    .populate('fiscalYearId', 'fiscalYear')
-    .populate('categoryId', 'name icon color')
-    .sort({ createdAt: -1 })
-    .limit(30);
-
-  res.json({ documents: docs });
+  try {
+    const docs = await Document.find()
+      .select('-fileData')
+      .populate('businessId', 'businessName')
+      .populate('fiscalYearId', 'fiscalYear')
+      .populate('categoryId', 'name icon color')
+      .sort({ createdAt: -1 })
+      .limit(30);
+    res.json({ documents: docs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// PASSWORD-PROTECTED DOCUMENT VIEW
+// View Protected Document
 app.post('/api/documents/:id/view', async (req, res) => {
   try {
     const { password } = req.body;
@@ -203,7 +174,7 @@ app.post('/api/documents/:id/view', async (req, res) => {
     const correctPassword = (setting && setting.value) || process.env.VIEW_PASSWORD || '1234';
 
     if (!password || password.trim() !== correctPassword.trim()) {
-      return res.status(401).json({ error: 'Incorrect view password. Access denied.' });
+      return res.status(401).json({ error: 'Incorrect view password.' });
     }
 
     const doc = await Document.findById(req.params.id)
@@ -226,25 +197,31 @@ app.post('/api/documents/:id/view', async (req, res) => {
   }
 });
 
-// Upload and file document
-app.post('/api/documents/upload', upload.single('file'), async (req, res) => {
+// Fast Document Upload
+app.post('/api/documents/upload', async (req, res) => {
   try {
-    const { businessId, fiscalYearId, categoryId, partyName, title, fileBase64, mimeType } = req.body;
+    const { businessId, fiscalYearId, categoryId, partyName, fileBase64, mimeType } = req.body;
 
-    if (!businessId || !fiscalYearId || !categoryId) {
-      return res.status(400).json({ error: 'Business, Fiscal Year, and Directory/Category are required' });
+    if (!fileBase64) {
+      return res.status(400).json({ error: 'No image or document received' });
     }
 
-    let rawData = fileBase64;
-    let rawType = mimeType || 'image/jpeg';
+    // Resolve or fallback IDs if dropdowns were still loading
+    let bId = businessId;
+    let fId = fiscalYearId;
+    let cId = categoryId;
 
-    if (req.file) {
-      rawData = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-      rawType = req.file.mimetype;
+    if (!bId || !mongoose.Types.ObjectId.isValid(bId)) {
+      const firstBiz = await Business.findOne();
+      bId = firstBiz ? firstBiz._id : null;
     }
-
-    if (!rawData) {
-      return res.status(400).json({ error: 'No file or photo provided' });
+    if (!fId || !mongoose.Types.ObjectId.isValid(fId)) {
+      const firstFY = await FiscalYear.findOne();
+      fId = firstFY ? firstFY._id : null;
+    }
+    if (!cId || !mongoose.Types.ObjectId.isValid(cId)) {
+      const firstCat = await Category.findOne();
+      cId = firstCat ? firstCat._id : null;
     }
 
     const count = await Document.countDocuments();
@@ -252,23 +229,23 @@ app.post('/api/documents/upload', upload.single('file'), async (req, res) => {
 
     const doc = await Document.create({
       documentRef: docRef,
-      businessId,
-      fiscalYearId,
-      categoryId,
-      title: title || 'Filing Record',
+      businessId: bId,
+      fiscalYearId: fId,
+      categoryId: cId,
       partyName: partyName || '',
-      fileData: rawData,
-      fileType: rawType
+      fileData: fileBase64,
+      fileType: mimeType || 'image/jpeg'
     });
 
-    res.json({ message: 'Filed successfully', documentRef: doc.documentRef });
+    res.json({ message: 'Success', documentRef: doc.documentRef });
   } catch (err) {
-    res.status(500).json({ error: 'Filing error: ' + err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Save failed: ' + err.message });
   }
 });
 
 // ==========================================
-// PUBLIC USER INTERFACE
+// USER INTERFACE
 // ==========================================
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -288,9 +265,8 @@ app.get('/', (req, res) => {
       --text: #283247;
       --muted: #7B8498;
       --clay-shadow: 6px 6px 14px #d8dfea, -6px -6px 14px #ffffff;
-      --clay-inset: inset 2px 2px 5px #d8dfea, inset -2px -2px 5px #ffffff;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
     body { background: var(--bg); color: var(--text); padding-bottom: 90px; }
     header { padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; }
     .brand { font-size: 1.4rem; font-weight: 800; color: var(--primary); display: flex; align-items: center; gap: 8px; }
@@ -305,8 +281,7 @@ app.get('/', (req, res) => {
     .sec-title { font-weight: 800; font-size: 1.1rem; }
     
     .biz-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin: 0 20px; }
-    .biz-card { background: #fff; border-radius: 20px; padding: 18px; box-shadow: var(--clay-shadow); cursor: pointer; transition: transform 0.15s ease; }
-    .biz-card:hover { transform: translateY(-2px); }
+    .biz-card { background: #fff; border-radius: 20px; padding: 18px; box-shadow: var(--clay-shadow); }
 
     .doc-item { background: #fff; border-radius: 18px; padding: 16px; margin: 10px 20px; box-shadow: var(--clay-shadow); display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
     .doc-ref { font-weight: 800; font-size: 0.95rem; }
@@ -326,36 +301,36 @@ app.get('/', (req, res) => {
   </header>
 
   <div class="actions">
-    <button class="btn-act btn-cap" onclick="startCapture()"><i class="fa-solid fa-camera"></i><br>CAPTURE</button>
-    <button class="btn-act btn-up" onclick="startUpload()"><i class="fa-solid fa-cloud-arrow-up"></i><br>UPLOAD</button>
+    <button class="btn-act btn-cap" onclick="openPicker('cameraPicker')"><i class="fa-solid fa-camera"></i><br>CAPTURE</button>
+    <button class="btn-act btn-up" onclick="openPicker('filePicker')"><i class="fa-solid fa-cloud-arrow-up"></i><br>UPLOAD</button>
   </div>
 
-  <!-- Hidden Pickers -->
-  <input type="file" id="cameraPicker" accept="image/*" capture="environment" style="display:none;" onchange="processFile(event)">
-  <input type="file" id="filePicker" accept="image/*,application/pdf" style="display:none;" onchange="processFile(event)">
+  <!-- Direct Native Inputs -->
+  <input type="file" id="cameraPicker" accept="image/*" capture="environment" style="display:none;" onchange="handlePickedFile(event)">
+  <input type="file" id="filePicker" accept="image/*,application/pdf" style="display:none;" onchange="handlePickedFile(event)">
 
   <div class="sec-header">
     <div class="sec-title">Directory / Businesses</div>
   </div>
-  <div class="biz-grid" id="bizContainer"><div class="biz-card">Connecting to database...</div></div>
+  <div class="biz-grid" id="bizContainer"><div class="biz-card">Loading businesses...</div></div>
 
   <div class="sec-header">
     <div class="sec-title">Recent Documents</div>
-    <span style="font-size:0.8rem; color:var(--muted);"><i class="fa-solid fa-lock"></i> Password Protected</span>
+    <span style="font-size:0.8rem; color:var(--muted);"><i class="fa-solid fa-lock"></i> Protected View</span>
   </div>
   <div id="docsContainer"><div class="doc-item">Fetching documents...</div></div>
 
   <!-- FILING MODAL -->
   <div class="modal" id="filingModal">
     <div class="modal-box">
-      <h3 style="font-weight:800; margin-bottom:6px;">File This Document</h3>
-      <p style="font-size:0.82rem; color:var(--muted); margin-bottom:14px;">Select destination business & directory folder.</p>
+      <h3 style="font-weight:800; margin-bottom:6px;">File Document</h3>
+      <p id="compressStatus" style="font-size:0.82rem; color:var(--primary); font-weight:700; margin-bottom:12px;"></p>
       
       <div id="previewWrap" style="text-align:center; margin-bottom:12px; display:none;">
         <img id="imgPreview" style="max-height:160px; max-width:100%; border-radius:12px; object-fit:contain; border:1px solid #eee;">
       </div>
 
-      <label style="font-size:0.8rem; font-weight:700;">Select Business *</label>
+      <label style="font-size:0.8rem; font-weight:700;">Business *</label>
       <select id="filingBiz" class="input"></select>
 
       <label style="font-size:0.8rem; font-weight:700;">Nepal Fiscal Year *</label>
@@ -364,23 +339,20 @@ app.get('/', (req, res) => {
       <label style="font-size:0.8rem; font-weight:700;">Directory Folder / Category *</label>
       <select id="filingCat" class="input"></select>
 
-      <label style="font-size:0.8rem; font-weight:700;">Party / Supplier Name</label>
-      <input type="text" id="filingParty" class="input" placeholder="e.g. Kathmandu Trading">
+      <label style="font-size:0.8rem; font-weight:700;">Party / Supplier (Optional)</label>
+      <input type="text" id="filingParty" class="input" placeholder="e.g. Pokhara Traders">
 
-      <button class="btn-sub" onclick="submitDocumentFiling()">Save Document</button>
+      <button id="saveDocBtn" class="btn-sub" onclick="submitDocumentFiling()">Save Document</button>
       <button style="width:100%; padding:10px; background:none; border:none; color:var(--muted); cursor:pointer; margin-top:8px; font-weight:700;" onclick="closeModal('filingModal')">Cancel</button>
     </div>
   </div>
 
-  <!-- PASSWORD PROMPT MODAL FOR VIEWING -->
+  <!-- PASSWORD PROMPT MODAL -->
   <div class="modal" id="pwdModal">
     <div class="modal-box">
-      <div style="text-align:center; margin-bottom:12px;">
-        <i class="fa-solid fa-lock" style="font-size:2.2rem; color:var(--primary);"></i>
-      </div>
+      <div style="text-align:center; margin-bottom:12px;"><i class="fa-solid fa-lock" style="font-size:2.2rem; color:var(--primary);"></i></div>
       <h3 style="font-weight:800; text-align:center; margin-bottom:6px;">Protected Document</h3>
-      <p style="font-size:0.82rem; color:var(--muted); text-align:center; margin-bottom:16px;">Enter the view password to inspect this file.</p>
-
+      <p style="font-size:0.82rem; color:var(--muted); text-align:center; margin-bottom:16px;">Enter the view password to view this file.</p>
       <input type="password" id="viewPwdInput" class="input" placeholder="Enter View Password" autocomplete="off">
       <button class="btn-sub" onclick="confirmPasswordView()">Unlock Document</button>
       <div id="pwdError" style="color:red; font-size:0.82rem; margin-top:8px; text-align:center; font-weight:600;"></div>
@@ -388,12 +360,12 @@ app.get('/', (req, res) => {
     </div>
   </div>
 
-  <!-- DOCUMENT VIEWER MODAL -->
+  <!-- VIEWER MODAL -->
   <div class="modal" id="viewModal">
     <div class="modal-box" style="max-width:540px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
         <div>
-          <h4 id="vTitle" style="font-weight:800;">Document</h4>
+          <h4 id="vTitle" style="font-weight:800;"></h4>
           <span id="vMeta" style="font-size:0.8rem; color:var(--muted);"></span>
         </div>
         <button onclick="closeModal('viewModal')" style="border:none; background:#eee; width:32px; height:32px; border-radius:50%; font-weight:800; cursor:pointer;">&times;</button>
@@ -404,14 +376,15 @@ app.get('/', (req, res) => {
 
   <script>
     let preparedBase64 = null;
-    let preparedMimeType = null;
+    let preparedMime = 'image/jpeg';
     let selectedDocIdToView = null;
 
-    function startCapture() { document.getElementById('cameraPicker').click(); }
-    function startUpload() { document.getElementById('filePicker').click(); }
+    function openPicker(id) {
+      document.getElementById(id).click();
+    }
 
-    // Automatic Client-Side Canvas Compression (Fixes Vercel 4.5MB Payload limit)
-    async function compressImageToCanvas(file) {
+    // Reliable Canvas Resizing with Image & PDF Fallback
+    async function compressFile(file) {
       return new Promise((resolve) => {
         if (!file.type.startsWith('image/')) {
           const reader = new FileReader();
@@ -425,7 +398,7 @@ app.get('/', (req, res) => {
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
-          const maxDim = 1280;
+          const maxDim = 1200;
 
           if (width > maxDim || height > maxDim) {
             if (width > height) {
@@ -436,24 +409,36 @@ app.get('/', (req, res) => {
               height = maxDim;
             }
           }
-
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
-          resolve({ base64: canvas.toDataURL('image/jpeg', 0.82), mime: 'image/jpeg' });
+          resolve({ base64: canvas.toDataURL('image/jpeg', 0.8), mime: 'image/jpeg' });
+        };
+        img.onerror = () => {
+          // Fallback if browser can't decode (e.g. HEIC)
+          const reader = new FileReader();
+          reader.onload = () => resolve({ base64: reader.result, mime: file.type });
+          reader.readAsDataURL(file);
         };
         img.src = URL.createObjectURL(file);
       });
     }
 
-    async function processFile(e) {
+    async function handlePickedFile(e) {
       const file = e.target.files[0];
       if (!file) return;
 
-      const { base64, mime } = await compressImageToCanvas(file);
+      document.getElementById('filingModal').style.display = 'flex';
+      document.getElementById('compressStatus').innerText = 'Optimizing file...';
+      document.getElementById('saveDocBtn').disabled = true;
+
+      const { base64, mime } = await compressFile(file);
       preparedBase64 = base64;
-      preparedMimeType = mime;
+      preparedMime = mime;
+
+      document.getElementById('compressStatus').innerText = '';
+      document.getElementById('saveDocBtn').disabled = false;
 
       if (mime.startsWith('image/')) {
         document.getElementById('imgPreview').src = base64;
@@ -461,41 +446,43 @@ app.get('/', (req, res) => {
       } else {
         document.getElementById('previewWrap').style.display = 'none';
       }
-
-      document.getElementById('filingModal').style.display = 'flex';
       e.target.value = '';
     }
 
     async function submitDocumentFiling() {
-      if (!preparedBase64) return;
+      if (!preparedBase64) return alert('No file prepared');
 
-      const payload = {
-        fileBase64: preparedBase64,
-        mimeType: preparedMimeType,
-        businessId: document.getElementById('filingBiz').value,
-        fiscalYearId: document.getElementById('filingFY').value,
-        categoryId: document.getElementById('filingCat').value,
-        partyName: document.getElementById('filingParty').value
-      };
-
-      closeModal('filingModal');
-      alert('Filing document...');
+      const btn = document.getElementById('saveDocBtn');
+      btn.innerText = 'Saving Document...';
+      btn.disabled = true;
 
       try {
         const res = await fetch('/api/documents/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            fileBase64: preparedBase64,
+            mimeType: preparedMime,
+            businessId: document.getElementById('filingBiz').value,
+            fiscalYearId: document.getElementById('filingFY').value,
+            categoryId: document.getElementById('filingCat').value,
+            partyName: document.getElementById('filingParty').value
+          })
         });
+
         const data = await res.json();
         if (res.ok) {
-          alert('Success! Document Reference: ' + data.documentRef);
+          closeModal('filingModal');
+          alert('Saved! Document ID: ' + data.documentRef);
           loadData();
         } else {
-          alert('Upload failed: ' + data.error);
+          alert('Upload failed: ' + (data.error || 'Server error'));
         }
       } catch (err) {
-        alert('Upload connection failed: ' + err.message);
+        alert('Network connection error: ' + err.message);
+      } finally {
+        btn.innerText = 'Save Document';
+        btn.disabled = false;
       }
     }
 
@@ -521,7 +508,7 @@ app.get('/', (req, res) => {
           </div>
         \`).join('');
 
-        // Populate selects
+        // Populate Selects
         document.getElementById('filingBiz').innerHTML = businesses.map(b => \`<option value="\${b._id}">\${b.businessName}</option>\`).join('');
         document.getElementById('filingFY').innerHTML = fiscalYears.map(f => \`<option value="\${f._id}">\${f.fiscalYear}</option>\`).join('');
         document.getElementById('filingCat').innerHTML = categories.map(c => \`<option value="\${c._id}">\${c.name}</option>\`).join('');
@@ -533,17 +520,16 @@ app.get('/', (req, res) => {
               <div class="doc-ref"><i class="fa-solid fa-file-lines" style="color:var(--primary); margin-right:6px;"></i>\${d.documentRef}</div>
               <div class="doc-sub">\${d.businessId?.businessName || 'Folder'} • \${d.categoryId?.name || 'File'} \${d.partyName ? '(' + d.partyName + ')' : ''}</div>
             </div>
-            <i class="fa-solid fa-lock" style="color:#d1d5db;"></i>
+            <i class="fa-solid fa-lock" style="color:#c5cbe0;"></i>
           </div>
         \`).join('') : '<div class="doc-item" style="color:var(--muted); justify-content:center;">No documents uploaded yet. Tap CAPTURE or UPLOAD!</div>';
-
       } catch (e) {
         console.error(e);
       }
     }
 
-    function promptView(docId) {
-      selectedDocIdToView = docId;
+    function promptView(id) {
+      selectedDocIdToView = id;
       document.getElementById('pwdError').innerText = '';
       document.getElementById('viewPwdInput').value = '';
       document.getElementById('pwdModal').style.display = 'flex';
@@ -573,7 +559,7 @@ app.get('/', (req, res) => {
           }
           document.getElementById('viewModal').style.display = 'flex';
         } else {
-          document.getElementById('pwdError').innerText = data.error || 'Access denied: Incorrect password';
+          document.getElementById('pwdError').innerText = data.error || 'Incorrect view password';
         }
       } catch (err) {
         document.getElementById('pwdError').innerText = 'Connection error';
