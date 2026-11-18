@@ -1,5 +1,5 @@
 /**
- * MEMOCLICK - PUBLIC CLIENT & FILING SYSTEM
+ * MEMOCLICK - PUBLIC CLIENT, SCANNER & DIRECTORY FILING SYSTEM
  * File: index.js
  */
 'use strict';
@@ -47,7 +47,7 @@ const DocumentSchema = new Schema({
   categoryId: { type: Schema.Types.ObjectId, ref: 'Category', default: null },
   title: { type: String, default: 'Document' },
   partyName: { type: String, default: '' },
-  isInbox: { type: Boolean, default: false },
+  isInbox: { type: Boolean, default: true, index: true },
   fileData: { type: String, required: true },
   fileType: { type: String, default: 'image/jpeg' },
   createdAt: { type: Date, default: Date.now, index: true }
@@ -59,14 +59,11 @@ const Category = mongoose.models.Category || mongoose.model('Category', Category
 const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
 const Document = mongoose.models.Document || mongoose.model('Document', DocumentSchema);
 
-// Safe Database Connection (Never crashes Lambda on cold start)
+// Safe Connection Pool
 async function ensureDb() {
   if (mongoose.connection.readyState === 1) return;
-  if (!MONGODB_URI) throw new Error('MONGODB_URI is not set');
-  await mongoose.connect(MONGODB_URI, {
-    maxPoolSize: 10,
-    serverSelectionTimeoutMS: 5000
-  });
+  if (!MONGODB_URI) throw new Error('MONGODB_URI is missing');
+  await mongoose.connect(MONGODB_URI, { maxPoolSize: 10, serverSelectionTimeoutMS: 5000 });
 }
 
 app.use(async (req, res, next) => {
@@ -74,11 +71,10 @@ app.use(async (req, res, next) => {
     await ensureDb();
     next();
   } catch (err) {
-    console.error('Database connection notice:', err.message);
     if (req.path.startsWith('/api/')) {
-      return res.status(503).json({ error: 'Database connecting, please retry: ' + err.message });
+      return res.status(503).json({ error: 'Database connecting, retry shortly: ' + err.message });
     }
-    next(); // Always allow HTML interface to load
+    next();
   }
 });
 
@@ -97,7 +93,9 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// APIs
+// ==========================================
+// REST APIS
+// ==========================================
 app.get('/api/businesses', async (req, res) => {
   try {
     let list = await Business.find({ isActive: true });
@@ -135,6 +133,8 @@ app.get('/api/categories', async (req, res) => {
       list = await Category.create([
         { name: 'Purchase Bills', icon: 'fa-shopping-bag', color: '#27AE60' },
         { name: 'Sales Bills', icon: 'fa-cash-register', color: '#2F80ED' },
+        { name: 'Debit Notes', icon: 'fa-file-invoice-dollar', color: '#668EF0' },
+        { name: 'Credit Notes', icon: 'fa-receipt', color: '#9B51E0' },
         { name: 'Tax Documents', icon: 'fa-landmark', color: '#EB5757' },
         { name: 'Other Documents', icon: 'fa-folder-open', color: '#7B8498' }
       ]);
@@ -147,9 +147,7 @@ app.get('/api/categories', async (req, res) => {
 
 app.get('/api/documents', async (req, res) => {
   try {
-    const { isInbox } = req.query;
-    const filter = isInbox === 'true' ? { isInbox: true } : {};
-    const docs = await Document.find(filter)
+    const docs = await Document.find()
       .select('-fileData')
       .populate('businessId', 'businessName')
       .populate('fiscalYearId', 'fiscalYear')
@@ -162,7 +160,58 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
-// View Document with Password
+// Upload Document (Initial Save)
+app.post('/api/documents/upload', async (req, res) => {
+  try {
+    const { fileBase64, mimeType, partyName } = req.body;
+    if (!fileBase64) return res.status(400).json({ error: 'No file received' });
+
+    const currentYear = '2082';
+    const randCode = Math.floor(100000 + Math.random() * 900000);
+    const docRef = `MC-${currentYear}-${randCode}`;
+
+    const doc = await Document.create({
+      documentRef: docRef,
+      partyName: partyName || '',
+      fileData: fileBase64,
+      fileType: mimeType || 'image/jpeg',
+      isInbox: true
+    });
+
+    res.json({ success: true, document: doc });
+  } catch (err) {
+    console.error('Upload Error:', err);
+    res.status(500).json({ error: 'Save failed: ' + err.message });
+  }
+});
+
+// Move Document to Destination Folder
+app.post('/api/documents/:id/organize', async (req, res) => {
+  try {
+    const { businessId, fiscalYearId, categoryId, isUncategorized } = req.body;
+    const doc = await Document.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    if (isUncategorized) {
+      doc.businessId = null;
+      doc.fiscalYearId = null;
+      doc.categoryId = null;
+      doc.isInbox = true;
+    } else {
+      doc.businessId = businessId || null;
+      doc.fiscalYearId = fiscalYearId || null;
+      doc.categoryId = categoryId || null;
+      doc.isInbox = false;
+    }
+
+    await doc.save();
+    res.json({ success: true, document: doc });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// View Document with Password Protection
 app.post('/api/documents/:id/view', async (req, res) => {
   try {
     const { password } = req.body;
@@ -183,68 +232,18 @@ app.post('/api/documents/:id/view', async (req, res) => {
       success: true,
       fileData: doc.fileData,
       fileType: doc.fileType,
-      title: doc.title,
       documentRef: doc.documentRef,
-      businessName: doc.businessId?.businessName || 'General',
-      categoryName: doc.categoryId?.name || 'File'
+      businessName: doc.businessId?.businessName || (doc.isInbox ? 'Uncategorized' : 'General'),
+      categoryName: doc.categoryId?.name || (doc.isInbox ? 'Inbox' : 'File')
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Upload Endpoint
-app.post('/api/documents/upload', async (req, res) => {
-  try {
-    const { businessId, fiscalYearId, categoryId, partyName, fileBase64, mimeType, isInbox } = req.body;
-
-    if (!fileBase64) {
-      return res.status(400).json({ error: 'No image or file data received' });
-    }
-
-    let bId = (businessId && mongoose.Types.ObjectId.isValid(businessId)) ? businessId : null;
-    let fId = (fiscalYearId && mongoose.Types.ObjectId.isValid(fiscalYearId)) ? fiscalYearId : null;
-    let cId = (categoryId && mongoose.Types.ObjectId.isValid(categoryId)) ? categoryId : null;
-
-    if (!isInbox) {
-      if (!bId) { const b = await Business.findOne(); if (b) bId = b._id; }
-      if (!fId) { const f = await FiscalYear.findOne(); if (f) fId = f._id; }
-      if (!cId) { const c = await Category.findOne(); if (c) cId = c._id; }
-    }
-
-    // Unique Collision-Free Reference
-    const currentYear = '2082';
-    const randCode = Math.floor(100000 + Math.random() * 900000);
-    const docRef = `MC-${currentYear}-${randCode}`;
-
-    const doc = await Document.create({
-      documentRef: docRef,
-      businessId: bId,
-      fiscalYearId: fId,
-      categoryId: cId,
-      partyName: partyName || '',
-      isInbox: !!isInbox,
-      fileData: fileBase64,
-      fileType: mimeType || 'image/jpeg'
-    });
-
-    res.json({
-      message: 'Success',
-      documentRef: doc.documentRef,
-      document: {
-        _id: doc._id,
-        documentRef: doc.documentRef,
-        partyName: doc.partyName,
-        createdAt: doc.createdAt
-      }
-    });
-  } catch (err) {
-    console.error('Upload Error:', err);
-    res.status(500).json({ error: 'Save failed: ' + err.message });
-  }
-});
-
-// UI View
+// ==========================================
+// USER INTERFACE (CLAYMORPHISM)
+// ==========================================
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!DOCTYPE html>
@@ -258,12 +257,16 @@ app.get('/', (req, res) => {
   <style>
     :root {
       --primary: #668EF0;
+      --soft-blue: #E5EEFF;
+      --mint: #C9EBDD;
+      --lavender: #E9E0FF;
+      --peach: #FFE3D3;
+      --yellow: #FFF0C7;
       --bg: #F4F6FB;
       --card: #FFFFFF;
       --text: #283247;
       --muted: #7B8498;
       --clay-shadow: 6px 6px 14px #d8dfea, -6px -6px 14px #ffffff;
-      --clay-inset: inset 2px 2px 5px #d8dfea, inset -2px -2px 5px #ffffff;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
     body { background: var(--bg); color: var(--text); padding-bottom: 90px; }
@@ -271,7 +274,7 @@ app.get('/', (req, res) => {
     .brand { font-size: 1.4rem; font-weight: 800; color: var(--primary); display: flex; align-items: center; gap: 8px; }
     .icon-bubble { width: 42px; height: 42px; border-radius: 50%; background: #fff; box-shadow: var(--clay-shadow); display: flex; align-items: center; justify-content: center; color: var(--primary); text-decoration: none; font-size: 1.15rem; cursor: pointer; }
 
-    /* Hero Buttons */
+    /* Action Buttons */
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
     .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; }
     .btn-cap { background: linear-gradient(135deg, #668EF0, #426fe4); box-shadow: 0 10px 20px rgba(102,142,240,0.3); }
@@ -290,7 +293,19 @@ app.get('/', (req, res) => {
     .doc-ref { font-weight: 800; font-size: 0.95rem; }
     .doc-sub { font-size: 0.8rem; color: var(--muted); margin-top: 3px; }
 
-    /* Animated Toast Notification */
+    /* Modals */
+    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.68); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(5px); }
+    .modal-box { background:#fff; padding:24px; border-radius:26px; width:92%; max-width:440px; max-height:90vh; overflow-y:auto; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
+    .input { width:100%; padding:14px; margin:8px 0 14px; border-radius:14px; border:1px solid #d1d5db; font-size:0.95rem; outline:none; }
+    .btn-primary { width:100%; padding:15px; background:var(--primary); color:#fff; border:none; border-radius:14px; font-weight:800; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; gap:8px; }
+    .btn-secondary { width:100%; padding:13px; background:#f0f2f5; color:var(--text); border:none; border-radius:14px; font-weight:700; cursor:pointer; font-size:0.95rem; margin-top:8px; }
+
+    /* Filter strip */
+    .filter-bar { display:flex; gap:8px; overflow-x:auto; margin:12px 0; padding:4px 0; }
+    .f-btn { padding:7px 14px; border-radius:12px; font-size:0.75rem; font-weight:700; background:#f0f2f5; border:none; cursor:pointer; white-space:nowrap; }
+    .f-btn.active { background:var(--primary); color:#fff; }
+
+    /* Toast */
     #statusToast {
       position: fixed; top: 16px; left: 50%; transform: translateX(-50%) translateY(-100px);
       background: #283247; color: #fff; padding: 14px 24px; border-radius: 30px; font-weight: 700;
@@ -301,96 +316,122 @@ app.get('/', (req, res) => {
     #statusToast.success { background: #10B981; }
     #statusToast.error { background: #EF4444; }
 
-    /* Modals */
-    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(4px); }
-    .modal-box { background:#fff; padding:24px; border-radius:24px; width:92%; max-width:440px; max-height:90vh; overflow-y:auto; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
-    .input { width:100%; padding:14px; margin:8px 0 14px; border-radius:14px; border:1px solid #d1d5db; font-size:0.95rem; outline:none; }
-    .btn-sub { width:100%; padding:14px; background:var(--primary); color:#fff; border:none; border-radius:14px; font-weight:800; cursor:pointer; font-size:1rem; }
-
-    /* Auto Scan Filter Strip */
-    .filter-bar { display:flex; gap:8px; overflow-x:auto; margin:10px 0; padding:4px 0; }
-    .f-btn { padding:6px 14px; border-radius:12px; font-size:0.75rem; font-weight:700; background:#f0f2f5; border:none; cursor:pointer; white-space:nowrap; }
-    .f-btn.active { background:var(--primary); color:#fff; }
+    /* Uploading Spinner */
+    .spinner-ring { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary); border-radius: 50%; width: 44px; height: 44px; animation: spin 0.9s linear infinite; margin: 0 auto 14px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <!-- Status Toast -->
   <div id="statusToast"><i class="fa-solid fa-spinner fa-spin" id="toastIcon"></i> <span id="toastMsg">Ready</span></div>
 
   <header>
     <div class="brand"><i class="fa-solid fa-shapes"></i> MemoClick</div>
     <div style="display:flex; gap:10px;">
-      <div class="icon-bubble" onclick="openInbox()"><i class="fa-solid fa-inbox"></i></div>
       <a href="/admin" class="icon-bubble" title="Admin Portal"><i class="fa-solid fa-shield-halved"></i></a>
     </div>
   </header>
 
-  <!-- NATIVE LABEL BINDINGS: Opens Camera & File Picker instantly on Chrome, Android & iOS -->
+  <!-- CAPTURE & UPLOAD BUTTONS -->
   <div class="actions">
-    <label class="btn-act btn-cap" for="nativeCameraInput">
+    <label class="btn-act btn-cap" for="camPicker">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
-      <input type="file" id="nativeCameraInput" accept="image/*" capture="environment" style="display:none;" onchange="handleFilePicked(this)">
+      <input type="file" id="camPicker" accept="image/*" capture="environment" style="display:none;" onchange="handleFilePicked(this)">
     </label>
-    <label class="btn-act btn-up" for="nativeUploadInput">
+    <label class="btn-act btn-up" for="filePicker">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
       <span class="sub">Gallery & PDFs</span>
-      <input type="file" id="nativeUploadInput" accept="image/*,application/pdf" style="display:none;" onchange="handleFilePicked(this)">
+      <input type="file" id="filePicker" accept="image/*,application/pdf" style="display:none;" onchange="handleFilePicked(this)">
     </label>
   </div>
 
-  <!-- Directory Section -->
+  <!-- DIRECTORY SECTION -->
   <div class="sec-header">
     <div class="sec-title">Directory / Businesses</div>
   </div>
   <div class="biz-grid" id="bizContainer"><div class="biz-card">Connecting to database...</div></div>
 
-  <!-- Recent Documents -->
+  <!-- RECENT DOCUMENTS -->
   <div class="sec-header">
-    <div class="sec-title" id="listHeading">Recent Documents</div>
+    <div class="sec-title">Recent Documents</div>
     <span style="font-size:0.8rem; color:var(--muted);"><i class="fa-solid fa-lock"></i> Protected View</span>
   </div>
   <div id="docsContainer"><div class="doc-item">Fetching documents...</div></div>
 
-  <!-- AUTO-SCAN & FILING MODAL -->
-  <div class="modal" id="filingModal">
+  <!-- STEP 1: REVIEW & AUTO-SCAN / CROP MODAL -->
+  <div class="modal" id="reviewModal">
     <div class="modal-box">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <h3 style="font-weight:800;">Review & File Document</h3>
-        <button onclick="closeModal('filingModal')" style="border:none; background:#f0f2f5; padding:6px 12px; border-radius:10px; font-weight:700; font-size:0.8rem; cursor:pointer;">Cancel</button>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 style="font-weight:800;">Review & Scan</h3>
+        <button onclick="closeModal('reviewModal')" style="border:none; background:#f0f2f5; padding:6px 12px; border-radius:10px; font-weight:700; cursor:pointer;">Cancel</button>
       </div>
 
-      <div style="text-align:center; margin-bottom:8px; background:#000; border-radius:14px; overflow:hidden; min-height:160px; display:flex; align-items:center; justify-content:center;">
-        <canvas id="previewCanvas" style="max-height:200px; max-width:100%; object-fit:contain;"></canvas>
+      <div style="text-align:center; background:#000; border-radius:16px; overflow:hidden; min-height:160px; display:flex; align-items:center; justify-content:center;">
+        <canvas id="previewCanvas" style="max-height:210px; max-width:100%; object-fit:contain;"></canvas>
       </div>
 
-      <!-- Auto Scan Readability Controls -->
+      <!-- Auto Scan / Crop Controls -->
       <div class="filter-bar">
         <button class="f-btn active" onclick="setFilter('original')">Original</button>
-        <button class="f-btn" onclick="setFilter('enhance')">Enhance</button>
+        <button class="f-btn" onclick="setFilter('enhance')">Auto Scan</button>
+        <button class="f-btn" onclick="setFilter('crop')">Auto-Crop</button>
         <button class="f-btn" onclick="setFilter('grayscale')">Grayscale</button>
         <button class="f-btn" onclick="setFilter('bw')">High Contrast</button>
         <button class="f-btn" onclick="rotatePreview()"><i class="fa-solid fa-rotate-right"></i> Rotate</button>
       </div>
 
-      <label style="font-size:0.8rem; font-weight:700;">Business *</label>
-      <select id="filingBiz" class="input"></select>
-
-      <label style="font-size:0.8rem; font-weight:700;">Nepal Fiscal Year *</label>
-      <select id="filingFY" class="input"></select>
-
-      <label style="font-size:0.8rem; font-weight:700;">Directory Folder / Category *</label>
-      <select id="filingCat" class="input"></select>
-
       <label style="font-size:0.8rem; font-weight:700;">Party / Supplier Name (Optional)</label>
-      <input type="text" id="filingParty" class="input" placeholder="e.g. Kathmandu Traders">
+      <input type="text" id="partyNameInput" class="input" placeholder="e.g. Pokhara Traders">
 
-      <div style="display:flex; gap:10px; margin-top:8px;">
-        <button class="btn-sub" style="background:#7B8498; flex:1;" onclick="submitFiling(true)">Save to Inbox</button>
-        <button class="btn-sub" style="flex:1;" onclick="submitFiling(false)">Save to Folder</button>
+      <button class="btn-primary" onclick="startUpload()">
+        <i class="fa-solid fa-cloud-arrow-up"></i> Upload Document
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP 2: UPLOADING ANIMATION MODAL -->
+  <div class="modal" id="uploadingModal">
+    <div class="modal-box" style="text-align:center; padding:36px 24px;">
+      <div class="spinner-ring"></div>
+      <h3 style="font-weight:800; margin-bottom:6px;">Uploading Document</h3>
+      <p style="font-size:0.85rem; color:var(--muted);">Securing and saving to cloud database...</p>
+    </div>
+  </div>
+
+  <!-- STEP 3: DESTINATION FOLDER SELECTION ("MOVE HERE" OR "UNCATEGORIZED") -->
+  <div class="modal" id="destinationModal">
+    <div class="modal-box">
+      <div style="text-align:center; margin-bottom:14px;">
+        <div style="width:52px; height:52px; background:var(--mint); color:#10B981; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:1.6rem; margin-bottom:8px;">
+          <i class="fa-solid fa-check"></i>
+        </div>
+        <h3 style="font-weight:800;">Upload Successful!</h3>
+        <p style="font-size:0.82rem; color:var(--muted);">Choose destination folder or save as uncategorized.</p>
       </div>
+
+      <!-- Folder Navigation Tree Selection -->
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:18px; padding:16px; margin-bottom:16px;">
+        <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-building"></i> Select Business</label>
+        <select id="destBiz" class="input" style="background:#fff;"></select>
+
+        <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-calendar"></i> Select Fiscal Year</label>
+        <select id="destFY" class="input" style="background:#fff;"></select>
+
+        <label style="font-size:0.8rem; font-weight:700; color:var(--muted);"><i class="fa-solid fa-folder"></i> Destination Directory Folder</label>
+        <select id="destCat" class="input" style="background:#fff;"></select>
+      </div>
+
+      <!-- Big "Move Here" Action Button -->
+      <button class="btn-primary" onclick="confirmMoveToFolder()">
+        <i class="fa-solid fa-folder-open"></i> Move Here
+      </button>
+
+      <!-- Uncategorized Fallback Button -->
+      <button class="btn-secondary" onclick="confirmKeepUncategorized()">
+        <i class="fa-solid fa-inbox"></i> Save as Uncategorized
+      </button>
     </div>
   </div>
 
@@ -399,11 +440,11 @@ app.get('/', (req, res) => {
     <div class="modal-box">
       <div style="text-align:center; margin-bottom:12px;"><i class="fa-solid fa-lock" style="font-size:2.2rem; color:var(--primary);"></i></div>
       <h3 style="font-weight:800; text-align:center; margin-bottom:6px;">Protected Document</h3>
-      <p style="font-size:0.82rem; color:var(--muted); text-align:center; margin-bottom:16px;">Enter the view password to view this document.</p>
+      <p style="font-size:0.82rem; color:var(--muted); text-align:center; margin-bottom:16px;">Enter view password to view this file.</p>
       <input type="password" id="viewPwdInput" class="input" placeholder="Enter View Password" autocomplete="off">
-      <button class="btn-sub" onclick="confirmPasswordView()">Unlock Document</button>
+      <button class="btn-primary" onclick="confirmPasswordView()">Unlock Document</button>
       <div id="pwdError" style="color:red; font-size:0.82rem; margin-top:8px; text-align:center; font-weight:600;"></div>
-      <button style="width:100%; padding:10px; background:none; border:none; color:var(--muted); cursor:pointer; margin-top:6px; font-weight:700;" onclick="closeModal('pwdModal')">Cancel</button>
+      <button class="btn-secondary" onclick="closeModal('pwdModal')">Cancel</button>
     </div>
   </div>
 
@@ -425,8 +466,10 @@ app.get('/', (req, res) => {
     let rawImage = new Image();
     let currentFilter = 'original';
     let currentRotation = 0;
+    let preparedBase64 = null;
+    let preparedMime = 'image/jpeg';
+    let latestUploadedDocId = null;
     let selectedDocIdToView = null;
-    let isViewingInbox = false;
 
     function showToast(msg, type = 'info') {
       const toast = document.getElementById('statusToast');
@@ -447,7 +490,7 @@ app.get('/', (req, res) => {
       if (type !== 'info') setTimeout(() => toast.classList.remove('show'), 3500);
     }
 
-    // Direct Native File Picker Handler
+    // Step 1: File Picked
     function handleFilePicked(input) {
       const file = input.files && input.files[0];
       if (!file) return;
@@ -458,36 +501,50 @@ app.get('/', (req, res) => {
           rawImage.onload = () => {
             currentFilter = 'original';
             currentRotation = 0;
-            document.getElementById('filingModal').style.display = 'flex';
+            document.getElementById('reviewModal').style.display = 'flex';
             renderCanvas();
           };
           rawImage.src = e.target.result;
         };
         reader.readAsDataURL(file);
       } else {
-        // Direct PDF upload
+        // Direct PDF selection
         const reader = new FileReader();
         reader.onload = (e) => {
-          uploadDirectBase64(e.target.result, file.type || 'application/pdf');
+          preparedBase64 = e.target.result;
+          preparedMime = file.type || 'application/pdf';
+          uploadDirectPayload();
         };
         reader.readAsDataURL(file);
       }
       input.value = '';
     }
 
-    // Auto-Scan Canvas Enhancement Engine
+    // Step 2: Render Canvas with Auto-Scan / Filters / Crop
     function renderCanvas() {
       const canvas = document.getElementById('previewCanvas');
       const ctx = canvas.getContext('2d');
 
+      let sw = rawImage.width;
+      let sh = rawImage.height;
+      let sx = 0, sy = 0;
+
+      // Auto-Crop (10% edge border cleanup)
+      if (currentFilter === 'crop') {
+        sx = Math.round(sw * 0.05);
+        sy = Math.round(sh * 0.05);
+        sw = Math.round(sw * 0.9);
+        sh = Math.round(sh * 0.9);
+      }
+
       const isSideways = currentRotation === 90 || currentRotation === 270;
-      canvas.width = isSideways ? rawImage.height : rawImage.width;
-      canvas.height = isSideways ? rawImage.width : rawImage.height;
+      canvas.width = isSideways ? sh : sw;
+      canvas.height = isSideways ? sw : sh;
 
       ctx.save();
       ctx.translate(canvas.width / 2, canvas.height / 2);
       ctx.rotate((currentRotation * Math.PI) / 180);
-      ctx.drawImage(rawImage, -rawImage.width / 2, -rawImage.height / 2);
+      ctx.drawImage(rawImage, sx, sy, sw, sh, -sw / 2, -sh / 2, sw, sh);
       ctx.restore();
 
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -506,7 +563,7 @@ app.get('/', (req, res) => {
         }
         ctx.putImageData(imgData, 0, 0);
       } else if (currentFilter === 'enhance') {
-        const factor = (259 * (40 + 255)) / (255 * (259 - 40));
+        const factor = (259 * (45 + 255)) / (255 * (259 - 45));
         for (let i = 0; i < d.length; i += 4) {
           d[i] = factor * (d[i] - 128) + 128;
           d[i + 1] = factor * (d[i + 1] - 128) + 128;
@@ -528,41 +585,103 @@ app.get('/', (req, res) => {
       renderCanvas();
     }
 
-    // Submit Document Filing
-    async function submitFiling(isInbox = false) {
+    // Step 3: Trigger Upload with Animation
+    function startUpload() {
       const canvas = document.getElementById('previewCanvas');
-      const base64Data = canvas.toDataURL('image/jpeg', 0.65);
-      closeModal('filingModal');
-      await uploadDirectBase64(base64Data, 'image/jpeg', isInbox);
+      // Downscale to max 850px for fast, guaranteed ~80KB upload
+      const tempCanvas = document.createElement('canvas');
+      let w = canvas.width;
+      let h = canvas.height;
+      const maxDim = 850;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+        else { w = Math.round((w * maxDim) / h); h = maxDim; }
+      }
+      tempCanvas.width = w;
+      tempCanvas.height = h;
+      tempCanvas.getContext('2d').drawImage(canvas, 0, 0, w, h);
+
+      preparedBase64 = tempCanvas.toDataURL('image/jpeg', 0.68);
+      preparedMime = 'image/jpeg';
+      closeModal('reviewModal');
+
+      uploadDirectPayload();
     }
 
-    async function uploadDirectBase64(base64Data, mimeType, isInbox = false) {
-      showToast('Uploading to database...', 'info');
+    // Step 4: Uploading Animation & Cloud Post
+    async function uploadDirectPayload() {
+      // Show Uploading Animation Modal
+      document.getElementById('uploadingModal').style.display = 'flex';
 
       try {
         const res = await fetch('/api/documents/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            fileBase64: base64Data,
-            mimeType: mimeType,
-            businessId: document.getElementById('filingBiz').value,
-            fiscalYearId: document.getElementById('filingFY').value,
-            categoryId: document.getElementById('filingCat').value,
-            partyName: document.getElementById('filingParty').value,
-            isInbox: isInbox
+            fileBase64: preparedBase64,
+            mimeType: preparedMime,
+            partyName: document.getElementById('partyNameInput').value
           })
         });
 
         const data = await res.json();
-        if (res.ok) {
-          showToast('Saved: ' + data.documentRef, 'success');
+        closeModal('uploadingModal');
+
+        if (res.ok && data.success) {
+          latestUploadedDocId = data.document._id;
+          // Step 5: Ask user where to move the file ("Move Here" or "Uncategorized")
+          document.getElementById('destinationModal').style.display = 'flex';
           loadData();
         } else {
-          showToast('Failed: ' + (data.error || 'Server error'), 'error');
+          showToast('Upload error: ' + (data.error || 'Server rejected'), 'error');
         }
       } catch (err) {
+        closeModal('uploadingModal');
         showToast('Connection error: ' + err.message, 'error');
+      }
+    }
+
+    // Step 5A: Confirm Move To Destination Folder ("Move Here")
+    async function confirmMoveToFolder() {
+      if (!latestUploadedDocId) return;
+
+      const bizId = document.getElementById('destBiz').value;
+      const fyId = document.getElementById('destFY').value;
+      const catId = document.getElementById('destCat').value;
+
+      closeModal('destinationModal');
+      showToast('Filing document to folder...', 'info');
+
+      try {
+        const res = await fetch('/api/documents/' + latestUploadedDocId + '/organize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ businessId: bizId, fiscalYearId: fyId, categoryId: catId, isUncategorized: false })
+        });
+        if (res.ok) {
+          showToast('Document moved to folder successfully!', 'success');
+          loadData();
+        }
+      } catch (e) {
+        showToast('Error organizing folder', 'error');
+      }
+    }
+
+    // Step 5B: Keep as Uncategorized
+    async function confirmKeepUncategorized() {
+      if (!latestUploadedDocId) return;
+      closeModal('destinationModal');
+
+      try {
+        await fetch('/api/documents/' + latestUploadedDocId + '/organize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isUncategorized: true })
+        });
+        showToast('Saved to Uncategorized Inbox!', 'success');
+        loadData();
+      } catch (e) {
+        showToast('Saved', 'success');
       }
     }
 
@@ -572,7 +691,7 @@ app.get('/', (req, res) => {
           fetch('/api/businesses').catch(() => null),
           fetch('/api/fiscal-years').catch(() => null),
           fetch('/api/categories').catch(() => null),
-          fetch(isViewingInbox ? '/api/documents?isInbox=true' : '/api/documents').catch(() => null)
+          fetch('/api/documents').catch(() => null)
         ]);
 
         const businesses = (bRes && bRes.ok) ? await bRes.json() : [];
@@ -585,7 +704,7 @@ app.get('/', (req, res) => {
         const catArr = Array.isArray(categories) ? categories : [];
         const docArr = (docs && Array.isArray(docs.documents)) ? docs.documents : [];
 
-        // Directory
+        // Render Directory
         if (bizArr.length > 0) {
           document.getElementById('bizContainer').innerHTML = bizArr.map(b => \`
             <div class="biz-card">
@@ -593,23 +712,23 @@ app.get('/', (req, res) => {
               <div style="font-size:0.8rem; color:var(--muted); margin-top:4px;">\${b.documentCount} Document\${b.documentCount === 1 ? '' : 's'}</div>
             </div>
           \`).join('');
-          document.getElementById('filingBiz').innerHTML = bizArr.map(b => \`<option value="\${b._id}">\${b.businessName}</option>\`).join('');
+          document.getElementById('destBiz').innerHTML = bizArr.map(b => \`<option value="\${b._id}">\${b.businessName}</option>\`).join('');
         }
 
         if (fyArr.length > 0) {
-          document.getElementById('filingFY').innerHTML = fyArr.map(f => \`<option value="\${f._id}">\${f.fiscalYear}</option>\`).join('');
+          document.getElementById('destFY').innerHTML = fyArr.map(f => \`<option value="\${f._id}">FY \${f.fiscalYear}</option>\`).join('');
         }
         if (catArr.length > 0) {
-          document.getElementById('filingCat').innerHTML = catArr.map(c => \`<option value="\${c._id}">\${c.name}</option>\`).join('');
+          document.getElementById('destCat').innerHTML = catArr.map(c => \`<option value="\${c._id}">📁 \${c.name}</option>\`).join('');
         }
 
-        // Recent Documents List
+        // Render Recent Documents
         if (docArr.length > 0) {
           document.getElementById('docsContainer').innerHTML = docArr.map(d => \`
             <div class="doc-item" onclick="promptView('\${d._id}')">
               <div>
                 <div class="doc-ref"><i class="fa-solid fa-file-lines" style="color:var(--primary); margin-right:6px;"></i>\${d.documentRef}</div>
-                <div class="doc-sub">\${d.businessId?.businessName || (d.isInbox ? 'Unsorted Inbox' : 'General')} • \${d.categoryId?.name || 'File'} \${d.partyName ? '(' + d.partyName + ')' : ''}</div>
+                <div class="doc-sub">\${d.businessId?.businessName || (d.isInbox ? 'Uncategorized Inbox' : 'General')} • \${d.categoryId?.name || 'File'} \${d.partyName ? '(' + d.partyName + ')' : ''}</div>
               </div>
               <i class="fa-solid fa-lock" style="color:#c5cbe0;"></i>
             </div>
@@ -620,12 +739,6 @@ app.get('/', (req, res) => {
       } catch (err) {
         console.error(err);
       }
-    }
-
-    function openInbox() {
-      isViewingInbox = !isViewingInbox;
-      document.getElementById('listHeading').innerText = isViewingInbox ? 'Unsorted Inbox' : 'Recent Documents';
-      loadData();
     }
 
     function promptView(id) {
@@ -659,7 +772,7 @@ app.get('/', (req, res) => {
           }
           document.getElementById('viewModal').style.display = 'flex';
         } else {
-          document.getElementById('pwdError').innerText = data.error || 'Incorrect view password';
+          document.getElementById('pwdError').innerText = data.error || 'Incorrect password';
         }
       } catch (err) {
         document.getElementById('pwdError').innerText = 'Connection error';
