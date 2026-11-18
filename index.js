@@ -282,20 +282,13 @@ app.get('/', (req, res) => {
 
     /* Action Buttons */
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
-    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; position: relative; overflow: hidden; }
+    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; }
     .btn-cap { background: linear-gradient(135deg, #668EF0, #426fe4); box-shadow: 0 10px 20px rgba(102,142,240,0.3); }
     .btn-up { background: linear-gradient(135deg, #43C6AC, #2BB594); box-shadow: 0 10px 20px rgba(43,181,148,0.3); }
     .btn-act span.sub { font-size: 0.78rem; font-weight: 500; opacity: 0.9; }
 
-    /* The invisible input that perfectly covers the button */
-    .file-input-absolute {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      width: 100%; height: 100%;
-      opacity: 0;
-      cursor: pointer;
-      z-index: 10;
-    }
+    /* Invisible input covering the button exactly */
+    .file-input-absolute { position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 10; }
 
     .sec-header { display: flex; justify-content: space-between; align-items: center; margin: 24px 24px 10px; }
     .sec-title { font-weight: 800; font-size: 1.1rem; }
@@ -309,34 +302,46 @@ app.get('/', (req, res) => {
     .doc-ref { font-weight: 800; font-size: 0.95rem; }
     .doc-sub { font-size: 0.8rem; color: var(--muted); margin-top: 3px; }
 
-    /* Modals */
+    /* Modals Base */
     .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(5px); }
     .modal-box { background:#fff; padding:24px; border-radius:26px; width:92%; max-width:440px; max-height:90vh; overflow-y:auto; box-shadow: 0 20px 40px rgba(0,0,0,0.25); }
     .input { width:100%; padding:14px; margin:8px 0 14px; border-radius:14px; border:1px solid #d1d5db; font-size:0.95rem; outline:none; }
     .btn-primary { width:100%; padding:15px; background:#007aff; color:#fff; border:none; border-radius:14px; font-weight:800; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; gap:8px; }
     .btn-secondary { width:100%; padding:13px; background:#f1f5f9; color:var(--text); border:none; border-radius:14px; font-weight:700; cursor:pointer; font-size:0.95rem; margin-top:8px; }
 
-    /* PREVIEW MODAL (WhatsApp Style) */
-    #whatsappPreviewModal { display:none; position:fixed; inset:0; background:#0b141a; z-index:10001; flex-direction:column; justify-content:space-between; }
-    .wa-top-bar { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; background:rgba(11,20,26,0.95); color:#e9edef; }
-    .wa-top-left { display:flex; align-items:center; gap:12px; font-weight:700; font-size:1.1rem; }
-    .wa-icon-btn { font-size:1.25rem; cursor:pointer; color:#e9edef; border:none; background:none; }
+    /* --- CUSTOM PREVIEW MODAL DESIGN --- */
+    #previewModal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:10001; justify-content:center; align-items:center; backdrop-filter: blur(8px); }
+    .preview-card { background:#fff; border-radius:28px; width:92%; max-width:650px; padding:24px; box-shadow: 0 20px 50px rgba(0,0,0,0.2); display:flex; flex-direction:column; gap:20px; position:relative; }
     
-    .wa-preview-area { flex:1; display:flex; align-items:center; justify-content:center; padding:10px; overflow:hidden; }
-    #waPreviewImg { max-width:100%; max-height:60vh; object-fit:contain; border-radius:8px; }
+    .preview-header { display:flex; justify-content:space-between; align-items:center; }
+    .preview-title { font-size:1.5rem; font-weight:800; color:var(--text); }
+    
+    .preview-content { display:flex; gap:24px; align-items:center; }
+    
+    /* Image Box */
+    .preview-img-box { flex:1; background:#f8fafc; border-radius:16px; border:2px solid #e2e8f0; display:flex; justify-content:center; align-items:center; padding:12px; min-height: 250px; max-height: 45vh; overflow:hidden; position: relative;}
+    #waPreviewImg { max-width:100%; max-height:100%; object-fit:contain; border-radius:8px; }
+    
+    /* PDF Preview inside box */
+    #pdfPreviewCard { display:none; flex-direction:column; align-items:center; text-align:center; color:var(--text); }
+    .pdf-big-icon { font-size:4rem; color:#EF4444; margin-bottom:12px; }
 
-    /* PDF Badge Preview */
-    #pdfPreviewCard { display:none; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center; padding:20px; }
-    .pdf-big-icon { font-size:4rem; color:#ff3b30; margin-bottom:12px; }
-
-    /* Filter strip for images */
-    .scan-strip { display:flex; background:#202c33; padding:12px 14px; gap:10px; overflow-x:auto; justify-content:center; border-top: 1px solid #334149; border-bottom: 1px solid #334149;}
-    .scan-opt-btn { padding:8px 16px; border-radius:20px; font-size:0.85rem; font-weight:700; background:#374248; color:#fff; border:none; cursor:pointer; white-space:nowrap; transition: 0.2s; }
-    .scan-opt-btn.active { background:#007aff; box-shadow: 0 0 10px rgba(0,122,255,0.4); }
-
-    .wa-bottom-bar { padding:14px 18px; background:rgba(11,20,26,0.95); display:flex; flex-direction: column; gap: 12px; padding-bottom: 24px;}
-    .wa-caption-input { width:100%; padding:12px 18px; border-radius:24px; border:1px solid #374248; background:#202c33; color:#fff; font-size:0.95rem; outline:none; }
-    .wa-float-send { width:100%; padding:16px; border-radius:14px; background:#007aff; color:#fff; border:none; font-weight:800; font-size:1rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
+    /* Action Column */
+    .preview-actions { width:140px; display:flex; flex-direction:column; gap:16px; align-items:center; }
+    .action-btn-row { display:flex; gap:12px; }
+    .circle-btn { width:56px; height:56px; border-radius:50%; border:none; background:#fff; box-shadow: var(--clay-shadow); display:flex; justify-content:center; align-items:center; font-size:1.2rem; cursor:pointer; transition:transform 0.1s; }
+    .circle-btn:active { transform:scale(0.95); }
+    .circle-btn.trash { color:#EF4444; }
+    .circle-btn.upload { background:#007aff; color:#fff; box-shadow: 0 8px 20px rgba(0,122,255,0.4); font-size:1.4rem; }
+    
+    /* Bottom Controls */
+    .preview-footer { display:flex; flex-direction:column; gap:16px; border-top:1px solid #e2e8f0; padding-top:20px; }
+    .preview-filters { display:flex; gap:12px; }
+    .filter-btn { flex:1; padding:14px; border-radius:16px; background:#fff; border:2px solid #e2e8f0; font-weight:800; font-size:0.95rem; color:var(--text); cursor:pointer; transition:0.2s; }
+    .filter-btn.active { border-color:#007aff; background:var(--soft-blue); color:#007aff; }
+    
+    .caption-input { width:100%; padding:16px; border-radius:16px; border:2px solid #e2e8f0; font-size:1rem; outline:none; background:#f8fafc; transition:0.2s; }
+    .caption-input:focus { border-color:#007aff; background:#fff; }
 
     /* Toast */
     #statusToast {
@@ -369,16 +374,15 @@ app.get('/', (req, res) => {
   <!-- ACTIONS -->
   <div class="actions">
     <!-- CAPTURE BUTTON -->
-    <div class="btn-act btn-cap">
+    <div class="btn-act btn-cap" style="position:relative; overflow:hidden;">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
-      <!-- Input is position absolute to cover the whole button. No JS click needed. -->
       <input type="file" id="directCamInput" class="file-input-absolute" accept="image/*" capture="environment" onchange="handleIncomingFile(this)">
     </div>
 
     <!-- UPLOAD BUTTON -->
-    <div class="btn-act btn-up">
+    <div class="btn-act btn-up" style="position:relative; overflow:hidden;">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
       <span class="sub">Gallery & PDFs</span>
@@ -399,46 +403,49 @@ app.get('/', (req, res) => {
   </div>
   <div id="docsContainer"><div class="doc-item">Fetching documents...</div></div>
 
-  <!-- 1. PREVIEW MODAL -->
-  <div id="whatsappPreviewModal">
-    <div class="wa-top-bar">
-      <div class="wa-top-left">
-        <i class="fa-regular fa-image" style="font-size:1.3rem;"></i>
-        <span>Review & Upload</span>
+  <!-- CUSTOM PREVIEW MODAL -->
+  <div id="previewModal">
+    <div class="preview-card">
+      <div class="preview-header">
+        <div class="preview-title">Image preview</div>
       </div>
-      <div class="wa-top-actions">
-        <button class="wa-icon-btn" title="Discard" onclick="discardPreview()"><i class="fa-regular fa-trash-can"></i> Cancel</button>
+      
+      <div class="preview-content">
+        <!-- Left Side: Image Box -->
+        <div class="preview-img-box">
+          <img id="waPreviewImg" src="" alt="Preview">
+          <div id="pdfPreviewCard">
+            <i class="fa-solid fa-file-pdf pdf-big-icon"></i>
+            <h4 id="pdfFileName" style="font-weight:800; margin-bottom:4px;">Document.pdf</h4>
+            <p id="pdfFileSize" style="font-size:0.8rem; color:var(--muted);">PDF Document</p>
+          </div>
+          <canvas id="hiddenCanvas" style="display:none;"></canvas>
+        </div>
+
+        <!-- Right Side: Actions -->
+        <div class="preview-actions">
+          <div class="action-btn-row">
+            <button class="circle-btn trash" onclick="discardPreview()" title="Discard"><i class="fa-regular fa-trash-can"></i></button>
+            <button class="circle-btn upload" onclick="executeUpload()" title="Upload"><i class="fa-solid fa-cloud-arrow-up"></i></button>
+          </div>
+        </div>
       </div>
-    </div>
 
-    <!-- Center Preview Area -->
-    <div class="wa-preview-area">
-      <img id="waPreviewImg" src="" alt="Preview">
-      <div id="pdfPreviewCard">
-        <i class="fa-solid fa-file-pdf pdf-big-icon"></i>
-        <h4 id="pdfFileName" style="font-weight:800; margin-bottom:4px;">Document.pdf</h4>
-        <p id="pdfFileSize" style="font-size:0.8rem; color:#94a3b8;">PDF Document</p>
+      <!-- Bottom: Filters & Caption -->
+      <div class="preview-footer">
+        <!-- Scanner Strip (Hidden for PDFs) -->
+        <div class="preview-filters" id="scanStrip">
+          <button class="filter-btn active" onclick="applyFilter('original', this)">Keep Original</button>
+          <button class="filter-btn" onclick="applyFilter('enhance', this)">Auto Scan</button>
+          <button class="filter-btn" onclick="applyFilter('crop', this)">Crop</button>
+        </div>
+        
+        <input type="text" id="waCaptionInput" class="caption-input" placeholder="Add a caption / Party name..." autocomplete="off">
       </div>
-      <canvas id="hiddenCanvas" style="display:none;"></canvas>
-    </div>
-
-    <!-- Scanner Filter Strip (Hidden for PDFs) -->
-    <div class="scan-strip" id="scanStrip">
-      <button class="scan-opt-btn active" onclick="applyFilter('original')">Keep Original</button>
-      <button class="scan-opt-btn" onclick="applyFilter('enhance')">Auto-Scan</button>
-      <button class="scan-opt-btn" onclick="applyFilter('crop')">Crop Border</button>
-    </div>
-
-    <!-- Bottom Caption Bar & Upload Button -->
-    <div class="wa-bottom-bar">
-      <input type="text" id="waCaptionInput" class="wa-caption-input" placeholder="Add a caption / Party name..." autocomplete="off">
-      <button class="wa-float-send" onclick="executeUpload()">
-        <i class="fa-solid fa-cloud-arrow-up"></i> Upload Document
-      </button>
     </div>
   </div>
 
-  <!-- 2. UPLOADING ANIMATION MODAL -->
+  <!-- UPLOADING ANIMATION MODAL -->
   <div class="modal" id="uploadingModal">
     <div class="modal-box" style="text-align:center; padding:36px 24px;">
       <div class="spinner-ring"></div>
@@ -450,7 +457,7 @@ app.get('/', (req, res) => {
     </div>
   </div>
 
-  <!-- 3. DESTINATION FOLDER MODAL -->
+  <!-- DESTINATION FOLDER MODAL -->
   <div class="modal" id="destinationModal">
     <div class="modal-box">
       <div style="text-align:center; margin-bottom:14px;">
@@ -563,8 +570,9 @@ app.get('/', (req, res) => {
 
     function openPreviewModal() {
       activeFilter = 'original';
-      document.querySelectorAll('.scan-opt-btn').forEach(b => b.classList.remove('active'));
-      document.querySelector('.scan-opt-btn').classList.add('active');
+      const filterBtns = document.querySelectorAll('.filter-btn');
+      filterBtns.forEach(b => b.classList.remove('active'));
+      if(filterBtns[0]) filterBtns[0].classList.add('active');
       
       document.getElementById('waCaptionInput').value = '';
 
@@ -581,19 +589,19 @@ app.get('/', (req, res) => {
         document.getElementById('scanStrip').style.display = 'none'; 
       }
 
-      document.getElementById('whatsappPreviewModal').style.display = 'flex';
+      document.getElementById('previewModal').style.display = 'flex';
     }
 
     function discardPreview() {
-      document.getElementById('whatsappPreviewModal').style.display = 'none';
+      document.getElementById('previewModal').style.display = 'none';
       currentRawBase64 = null;
       processedBase64 = null;
     }
 
-    function applyFilter(mode) {
+    function applyFilter(mode, btnElement) {
       activeFilter = mode;
-      document.querySelectorAll('.scan-opt-btn').forEach(b => b.classList.remove('active'));
-      event.target.classList.add('active');
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btnElement.classList.add('active');
       renderProcessedImage();
     }
 
@@ -648,7 +656,7 @@ app.get('/', (req, res) => {
 
       const caption = document.getElementById('waCaptionInput').value.trim();
 
-      document.getElementById('whatsappPreviewModal').style.display = 'none';
+      document.getElementById('previewModal').style.display = 'none';
       document.getElementById('uploadingModal').style.display = 'flex';
       
       const progressBar = document.getElementById('uploadProgressBar');
