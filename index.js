@@ -1,5 +1,5 @@
 /**
- * MEMOCLICK - PUBLIC CLIENT & FILING SYSTEM
+ * MEMOCLICK - FULL WORKING PUBLIC CLIENT & FILING SYSTEM
  * File: index.js
  */
 'use strict';
@@ -50,6 +50,7 @@ const DocumentSchema = new Schema({
   isInbox: { type: Boolean, default: true, index: true },
   fileData: { type: String, required: true },
   fileType: { type: String, default: 'image/jpeg' },
+  fileName: { type: String, default: 'file' },
   createdAt: { type: Date, default: Date.now, index: true }
 });
 
@@ -161,8 +162,8 @@ app.get('/api/documents', async (req, res) => {
 // Upload Document Endpoint
 app.post('/api/documents/upload', async (req, res) => {
   try {
-    const { fileBase64, mimeType, partyName } = req.body;
-    if (!fileBase64) return res.status(400).json({ error: 'No image or file data received' });
+    const { fileBase64, mimeType, fileName, partyName } = req.body;
+    if (!fileBase64) return res.status(400).json({ error: 'No file received' });
 
     const currentYear = '2082';
     const randCode = Math.floor(100000 + Math.random() * 900000);
@@ -171,6 +172,7 @@ app.post('/api/documents/upload', async (req, res) => {
     const doc = await Document.create({
       documentRef: docRef,
       partyName: partyName || '',
+      fileName: fileName || 'Document',
       fileData: fileBase64,
       fileType: mimeType || 'image/jpeg',
       isInbox: true
@@ -183,7 +185,7 @@ app.post('/api/documents/upload', async (req, res) => {
   }
 });
 
-// Move Document to Selected Destination Folder
+// Move Document to Destination Folder
 app.post('/api/documents/:id/organize', async (req, res) => {
   try {
     const { businessId, fiscalYearId, categoryId, isUncategorized } = req.body;
@@ -209,7 +211,7 @@ app.post('/api/documents/:id/organize', async (req, res) => {
   }
 });
 
-// Password Protected View Verification
+// Password Protected View
 app.post('/api/documents/:id/view', async (req, res) => {
   try {
     const { password } = req.body;
@@ -230,6 +232,7 @@ app.post('/api/documents/:id/view', async (req, res) => {
       success: true,
       fileData: doc.fileData,
       fileType: doc.fileType,
+      fileName: doc.fileName,
       documentRef: doc.documentRef,
       businessName: doc.businessId?.businessName || (doc.isInbox ? 'Uncategorized' : 'General'),
       categoryName: doc.categoryId?.name || (doc.isInbox ? 'Inbox' : 'File')
@@ -271,7 +274,7 @@ app.get('/', (req, res) => {
 
     /* Action Buttons */
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
-    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; }
+    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; }
     .btn-cap { background: linear-gradient(135deg, #668EF0, #426fe4); box-shadow: 0 10px 20px rgba(102,142,240,0.3); }
     .btn-up { background: linear-gradient(135deg, #43C6AC, #2BB594); box-shadow: 0 10px 20px rgba(43,181,148,0.3); }
     .btn-act span.sub { font-size: 0.78rem; font-weight: 500; opacity: 0.9; }
@@ -295,7 +298,7 @@ app.get('/', (req, res) => {
     .btn-primary { width:100%; padding:15px; background:#007aff; color:#fff; border:none; border-radius:14px; font-weight:800; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; gap:8px; }
     .btn-secondary { width:100%; padding:13px; background:#f1f5f9; color:var(--text); border:none; border-radius:14px; font-weight:700; cursor:pointer; font-size:0.95rem; margin-top:8px; }
 
-    /* WHATSAPP-STYLE MEDIA PREVIEW (Exact match to screenshot) */
+    /* WHATSAPP-STYLE MEDIA PREVIEW (Matches Screenshot) */
     #whatsappPreviewModal { display:none; position:fixed; inset:0; background:#0b141a; z-index:10001; flex-direction:column; justify-content:space-between; }
     .wa-top-bar { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; background:rgba(11,20,26,0.95); color:#e9edef; }
     .wa-top-left { display:flex; align-items:center; gap:12px; font-weight:700; font-size:1.1rem; }
@@ -306,7 +309,11 @@ app.get('/', (req, res) => {
     .wa-send-btn { color:#007aff; font-weight:800; font-size:1.05rem; cursor:pointer; background:none; border:none; }
     
     .wa-preview-area { flex:1; display:flex; align-items:center; justify-content:center; padding:10px; overflow:hidden; }
-    #waPreviewImg { max-width:100%; max-height:70vh; object-fit:contain; border-radius:8px; }
+    #waPreviewImg { max-width:100%; max-height:68vh; object-fit:contain; border-radius:8px; }
+
+    /* PDF Badge Preview */
+    #pdfPreviewCard { display:none; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center; padding:20px; }
+    .pdf-big-icon { font-size:4rem; color:#ff3b30; margin-bottom:12px; }
 
     .wa-bottom-bar { padding:14px 18px; background:rgba(11,20,26,0.95); display:flex; gap:10px; align-items:center; }
     .wa-caption-input { flex:1; padding:12px 18px; border-radius:24px; border:1px solid #374248; background:#202c33; color:#fff; font-size:0.95rem; outline:none; }
@@ -316,6 +323,13 @@ app.get('/', (req, res) => {
     .scan-strip { display:none; background:#202c33; padding:10px 14px; gap:8px; overflow-x:auto; }
     .scan-opt-btn { padding:6px 14px; border-radius:12px; font-size:0.75rem; font-weight:700; background:#374248; color:#fff; border:none; cursor:pointer; white-space:nowrap; }
     .scan-opt-btn.active { background:#007aff; }
+
+    /* Webcam Viewfinder for Desktop */
+    #desktopWebcamModal { display:none; position:fixed; inset:0; background:#000; z-index:10002; flex-direction:column; justify-content:space-between; }
+    #webcamVideo { width:100%; height:80vh; object-fit:cover; }
+    .cam-bottom { height:20vh; background:#111; display:flex; justify-content:space-around; align-items:center; padding:0 24px; }
+    .shutter-btn { width:74px; height:74px; border-radius:50%; background:#fff; border:6px solid rgba(255,255,255,0.3); display:flex; align-items:center; justify-content:center; cursor:pointer; }
+    .shutter-core { width:52px; height:52px; border-radius:50%; background:#007aff; }
 
     /* Toast */
     #statusToast {
@@ -345,18 +359,16 @@ app.get('/', (req, res) => {
 
   <!-- ACTIONS -->
   <div class="actions">
-    <label class="btn-act btn-cap" for="camInput">
+    <button class="btn-act btn-cap" onclick="handleCaptureClick()">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
-      <input type="file" id="camInput" accept="image/*" capture="environment" style="display:none;" onchange="handleIncomingFile(this)">
-    </label>
-    <label class="btn-act btn-up" for="filePickerInput">
+    </button>
+    <button class="btn-act btn-up" onclick="document.getElementById('nativeUploadInput').click()">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
       <span class="sub">Gallery & PDFs</span>
-      <input type="file" id="filePickerInput" accept="image/*,application/pdf" style="display:none;" onchange="handleIncomingFile(this)">
-    </label>
+    </button>
   </div>
 
   <!-- DIRECTORY SECTION -->
@@ -372,9 +384,9 @@ app.get('/', (req, res) => {
   </div>
   <div id="docsContainer"><div class="doc-item">Fetching documents...</div></div>
 
-  <!-- 1. WHATSAPP STYLE REVIEW PREVIEW MODAL -->
+  <!-- 1. WHATSAPP STYLE REVIEW PREVIEW MODAL (Exact match to screenshot) -->
   <div id="whatsappPreviewModal">
-    <!-- Top Bar (Matching Screenshot) -->
+    <!-- Top Bar -->
     <div class="wa-top-bar">
       <div class="wa-top-left">
         <i class="fa-regular fa-image" style="font-size:1.3rem;"></i>
@@ -387,7 +399,7 @@ app.get('/', (req, res) => {
       </div>
     </div>
 
-    <!-- Scanner / Filter Strip (Toggled by Crop icon) -->
+    <!-- Scanner Filter Strip -->
     <div class="scan-strip" id="scanStrip">
       <button class="scan-opt-btn active" onclick="applyFilter('original')">Original</button>
       <button class="scan-opt-btn" onclick="applyFilter('enhance')">Auto-Scan</button>
@@ -400,17 +412,32 @@ app.get('/', (req, res) => {
     <!-- Center Preview Area -->
     <div class="wa-preview-area">
       <img id="waPreviewImg" src="" alt="Preview">
+      <div id="pdfPreviewCard">
+        <i class="fa-solid fa-file-pdf pdf-big-icon"></i>
+        <h4 id="pdfFileName" style="font-weight:800; margin-bottom:4px;">Document.pdf</h4>
+        <p id="pdfFileSize" style="font-size:0.8rem; color:#94a3b8;">PDF Document</p>
+      </div>
       <canvas id="hiddenCanvas" style="display:none;"></canvas>
     </div>
 
-    <!-- Bottom Caption Bar (Matching Screenshot) -->
+    <!-- Bottom Caption Bar -->
     <div class="wa-bottom-bar">
       <input type="text" id="waCaptionInput" class="wa-caption-input" placeholder="Add a caption / Party name..." autocomplete="off">
       <button class="wa-float-send" title="Upload" onclick="executeUpload()"><i class="fa-solid fa-paper-plane"></i></button>
     </div>
   </div>
 
-  <!-- 2. UPLOADING ANIMATION MODAL -->
+  <!-- 2. DESKTOP WEBCAM VIEWFINDER MODAL -->
+  <div id="desktopWebcamModal">
+    <video id="webcamVideo" autoplay playsinline></video>
+    <div class="cam-bottom">
+      <button class="icon-bubble" onclick="stopDesktopCamera()"><i class="fa-solid fa-xmark"></i></button>
+      <div class="shutter-btn" onclick="captureDesktopFrame()"><div class="shutter-core"></div></div>
+      <button class="icon-bubble" onclick="stopDesktopCamera(); document.getElementById('nativeUploadInput').click();" title="Pick from computer"><i class="fa-solid fa-folder-open"></i></button>
+    </div>
+  </div>
+
+  <!-- 3. UPLOADING ANIMATION MODAL -->
   <div class="modal" id="uploadingModal">
     <div class="modal-box" style="text-align:center; padding:36px 24px;">
       <div class="spinner-ring"></div>
@@ -419,7 +446,7 @@ app.get('/', (req, res) => {
     </div>
   </div>
 
-  <!-- 3. DESTINATION FOLDER MODAL ("MOVE HERE" OR "UNCATEGORIZED") -->
+  <!-- 4. DESTINATION FOLDER MODAL ("MOVE HERE" OR "UNCATEGORIZED") -->
   <div class="modal" id="destinationModal">
     <div class="modal-box">
       <div style="text-align:center; margin-bottom:14px;">
@@ -442,7 +469,7 @@ app.get('/', (req, res) => {
         <select id="destCat" class="input" style="background:#fff;"></select>
       </div>
 
-      <!-- Prominent "Move Here" Action Button -->
+      <!-- Prominent "Move Here" Button -->
       <button class="btn-primary" onclick="confirmMoveToFolder()">
         <i class="fa-solid fa-folder-open"></i> Move Here
       </button>
@@ -481,14 +508,20 @@ app.get('/', (req, res) => {
     </div>
   </div>
 
+  <!-- Hidden Native Inputs (Placed outside buttons to prevent event cancel conflicts) -->
+  <input type="file" id="mobileCameraInput" accept="image/*" capture="environment" style="display:none;" onchange="handleIncomingFile(this)">
+  <input type="file" id="nativeUploadInput" accept="image/*,application/pdf" style="display:none;" onchange="handleIncomingFile(this)">
+
   <script>
     let currentRawBase64 = null;
     let processedBase64 = null;
     let currentMimeType = 'image/jpeg';
+    let currentFileName = 'document';
     let currentRotation = 0;
     let activeFilter = 'original';
     let latestUploadedDocId = null;
     let selectedDocIdToView = null;
+    let activeWebcamStream = null;
 
     function showToast(msg, type = 'info') {
       const toast = document.getElementById('statusToast');
@@ -509,29 +542,100 @@ app.get('/', (req, res) => {
       if (type !== 'info') setTimeout(() => toast.classList.remove('show'), 3500);
     }
 
-    // Handle Captured Photo or Picked File
+    // Smart Capture Trigger: Phone launches camera; PC opens live webcam or picker
+    function handleCaptureClick() {
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      if (isMobile) {
+        document.getElementById('mobileCameraInput').click();
+      } else {
+        // Try live webcam on desktop
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+              activeWebcamStream = stream;
+              document.getElementById('webcamVideo').srcObject = stream;
+              document.getElementById('desktopWebcamModal').style.display = 'flex';
+            })
+            .catch(() => {
+              // No webcam or denied: open photo chooser
+              document.getElementById('nativeUploadInput').click();
+            });
+        } else {
+          document.getElementById('nativeUploadInput').click();
+        }
+      }
+    }
+
+    function stopDesktopCamera() {
+      if (activeWebcamStream) {
+        activeWebcamStream.getTracks().forEach(t => t.stop());
+        activeWebcamStream = null;
+      }
+      document.getElementById('desktopWebcamModal').style.display = 'none';
+    }
+
+    function captureDesktopFrame() {
+      const video = document.getElementById('webcamVideo');
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 960;
+      canvas.height = video.videoHeight || 720;
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+      stopDesktopCamera();
+
+      currentRawBase64 = canvas.toDataURL('image/jpeg', 0.85);
+      processedBase64 = currentRawBase64;
+      currentMimeType = 'image/jpeg';
+      currentFileName = 'camera_capture.jpg';
+      openWhatsappPreview();
+    }
+
+    // File Selected from Picker or Phone Camera
     function handleIncomingFile(input) {
       const file = input.files && input.files[0];
       if (!file) return;
 
+      currentFileName = file.name || 'document';
       currentMimeType = file.type || 'image/jpeg';
+
+      // Check Vercel 4.5MB limit on PDFs
+      if (currentMimeType === 'application/pdf' && file.size > 4 * 1024 * 1024) {
+        alert('This PDF exceeds 4MB (Vercel limit). Please choose a smaller document.');
+        input.value = '';
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = function(e) {
         currentRawBase64 = e.target.result;
         processedBase64 = e.target.result;
-        currentRotation = 0;
-        activeFilter = 'original';
-
-        document.getElementById('waPreviewImg').src = currentRawBase64;
-        document.getElementById('waCaptionInput').value = '';
-        document.getElementById('scanStrip').style.display = 'none';
-        document.getElementById('whatsappPreviewModal').style.display = 'flex';
+        openWhatsappPreview();
       };
       reader.readAsDataURL(file);
       input.value = '';
     }
 
+    function openWhatsappPreview() {
+      currentRotation = 0;
+      activeFilter = 'original';
+      document.getElementById('waCaptionInput').value = '';
+      document.getElementById('scanStrip').style.display = 'none';
+
+      if (currentMimeType.startsWith('image/')) {
+        document.getElementById('waPreviewImg').src = processedBase64;
+        document.getElementById('waPreviewImg').style.display = 'block';
+        document.getElementById('pdfPreviewCard').style.display = 'none';
+      } else {
+        // PDF display
+        document.getElementById('waPreviewImg').style.display = 'none';
+        document.getElementById('pdfPreviewCard').style.display = 'flex';
+        document.getElementById('pdfFileName').innerText = currentFileName;
+      }
+
+      document.getElementById('whatsappPreviewModal').style.display = 'flex';
+    }
+
     function toggleScanStrip() {
+      if (!currentMimeType.startsWith('image/')) return;
       const strip = document.getElementById('scanStrip');
       strip.style.display = strip.style.display === 'flex' ? 'none' : 'flex';
     }
@@ -613,17 +717,15 @@ app.get('/', (req, res) => {
       img.src = currentRawBase64;
     }
 
-    // Step 3 & 4: Upload Execution with Animation
+    // Upload Execution with Animation
     async function executeUpload() {
       if (!processedBase64) return;
 
       const caption = document.getElementById('waCaptionInput').value.trim();
 
-      // Close preview and show animated uploading screen
       document.getElementById('whatsappPreviewModal').style.display = 'none';
       document.getElementById('uploadingModal').style.display = 'flex';
 
-      // Downscale to max 850px for fast, reliable upload under Vercel limits
       const uploadPayload = await getDownscaledPayload(processedBase64);
 
       try {
@@ -633,6 +735,7 @@ app.get('/', (req, res) => {
           body: JSON.stringify({
             fileBase64: uploadPayload,
             mimeType: currentMimeType,
+            fileName: currentFileName,
             partyName: caption
           })
         });
@@ -642,7 +745,6 @@ app.get('/', (req, res) => {
 
         if (res.ok && data.success) {
           latestUploadedDocId = data.document._id;
-          // Step 5: Ask user where to move the file ("Move Here" or "Uncategorized")
           document.getElementById('destinationModal').style.display = 'flex';
           loadData();
         } else {
@@ -678,7 +780,7 @@ app.get('/', (req, res) => {
       });
     }
 
-    // Step 5A: Move Here
+    // Move To Destination Folder ("Move Here")
     async function confirmMoveToFolder() {
       if (!latestUploadedDocId) return;
 
@@ -696,7 +798,7 @@ app.get('/', (req, res) => {
           body: JSON.stringify({ businessId: bizId, fiscalYearId: fyId, categoryId: catId, isUncategorized: false })
         });
         if (res.ok) {
-          showToast('Moved to folder successfully!', 'success');
+          showToast('Document moved to folder successfully!', 'success');
           loadData();
         }
       } catch (e) {
@@ -704,7 +806,7 @@ app.get('/', (req, res) => {
       }
     }
 
-    // Step 5B: Keep as Uncategorized
+    // Save As Uncategorized
     async function confirmKeepUncategorized() {
       if (!latestUploadedDocId) return;
       closeModal('destinationModal');
@@ -764,8 +866,8 @@ app.get('/', (req, res) => {
           document.getElementById('docsContainer').innerHTML = docArr.map(d => \`
             <div class="doc-item" onclick="promptView('\${d._id}')">
               <div>
-                <div class="doc-ref"><i class="fa-solid fa-file-lines" style="color:#007aff; margin-right:6px;"></i>\${d.documentRef}</div>
-                <div class="doc-sub">\${d.businessId?.businessName || (d.isInbox ? 'Uncategorized Inbox' : 'General')} • \${d.categoryId?.name || 'File'} \${d.partyName ? '(' + d.partyName + ')' : ''}</div>
+                <div class="doc-ref"><i class="fa-solid \${d.fileType === 'application/pdf' ? 'fa-file-pdf' : 'fa-file-lines'}" style="color:#007aff; margin-right:6px;"></i>\${d.documentRef}</div>
+                <div class="doc-sub">\${d.businessId?.businessName || (d.isInbox ? 'Uncategorized Inbox' : 'General')} • \${d.categoryId?.name || (d.fileType === 'application/pdf' ? 'PDF Document' : 'File')} \${d.partyName ? '(' + d.partyName + ')' : ''}</div>
               </div>
               <i class="fa-solid fa-lock" style="color:#c5cbe0;"></i>
             </div>
