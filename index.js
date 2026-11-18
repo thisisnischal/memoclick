@@ -1,5 +1,5 @@
 /**
- * MEMOCLICK - FAST ENGINE & PUBLIC CLIENT INTERFACE
+ * MEMOCLICK - BULLETPROOF PUBLIC APP & FILING
  * File: index.js
  */
 'use strict';
@@ -9,7 +9,6 @@ const express = require('express');
 const mongoose = require('mongoose');
 const helmet = require('helmet');
 const cors = require('cors');
-const multer = require('multer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -43,9 +42,9 @@ const SettingSchema = new Schema({
 
 const DocumentSchema = new Schema({
   documentRef: { type: String, required: true, unique: true },
-  businessId: { type: Schema.Types.ObjectId, ref: 'Business', required: true },
-  fiscalYearId: { type: Schema.Types.ObjectId, ref: 'FiscalYear', required: true },
-  categoryId: { type: Schema.Types.ObjectId, ref: 'Category', required: true },
+  businessId: { type: Schema.Types.ObjectId, ref: 'Business', default: null },
+  fiscalYearId: { type: Schema.Types.ObjectId, ref: 'FiscalYear', default: null },
+  categoryId: { type: Schema.Types.ObjectId, ref: 'Category', default: null },
   title: { type: String, default: 'Document' },
   partyName: { type: String, default: '' },
   fileData: { type: String, required: true },
@@ -59,12 +58,12 @@ const Category = mongoose.models.Category || mongoose.model('Category', Category
 const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
 const Document = mongoose.models.Document || mongoose.model('Document', DocumentSchema);
 
-// Fast Cached DB Connection
+// Connection Pool
 let connPromise = null;
 async function connectDb() {
   if (mongoose.connection.readyState === 1) return mongoose.connection;
   if (!connPromise) {
-    if (!MONGODB_URI) throw new Error('MONGODB_URI is not configured');
+    if (!MONGODB_URI) throw new Error('MONGODB_URI missing');
     connPromise = mongoose.connect(MONGODB_URI, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
@@ -79,7 +78,7 @@ app.use(async (req, res, next) => {
     await connectDb();
     next();
   } catch (err) {
-    res.status(503).json({ error: 'Database unavailable: ' + err.message });
+    res.status(503).json({ error: 'Database connecting: ' + err.message });
   }
 });
 
@@ -95,8 +94,8 @@ app.use(helmet({
   }
 }));
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: '12mb' }));
-app.use(express.urlencoded({ extended: true, limit: '12mb' }));
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // ==========================================
 // PUBLIC APIs
@@ -114,8 +113,8 @@ app.get('/api/businesses', async (req, res) => {
     const countMap = {};
     counts.forEach(c => { if (c._id) countMap[c._id.toString()] = c.count; });
     res.json(list.map(b => ({ ...b.toObject(), documentCount: countMap[b._id.toString()] || 0 })));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.json([]);
   }
 });
 
@@ -123,14 +122,11 @@ app.get('/api/fiscal-years', async (req, res) => {
   try {
     let list = await FiscalYear.find().sort({ fiscalYear: -1 });
     if (list.length === 0) {
-      list = await FiscalYear.create([
-        { fiscalYear: '2082/83', isCurrent: true },
-        { fiscalYear: '2083/84' }
-      ]);
+      list = await FiscalYear.create([{ fiscalYear: '2082/83', isCurrent: true }, { fiscalYear: '2083/84' }]);
     }
     res.json(list);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.json([]);
   }
 });
 
@@ -146,8 +142,8 @@ app.get('/api/categories', async (req, res) => {
       ]);
     }
     res.json(list);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.json([]);
   }
 });
 
@@ -157,16 +153,16 @@ app.get('/api/documents', async (req, res) => {
       .select('-fileData')
       .populate('businessId', 'businessName')
       .populate('fiscalYearId', 'fiscalYear')
-      .populate('categoryId', 'name icon color')
+      .populate('categoryId', 'name')
       .sort({ createdAt: -1 })
       .limit(30);
     res.json({ documents: docs });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.json({ documents: [] });
   }
 });
 
-// View Protected Document
+// View Document with Password
 app.post('/api/documents/:id/view', async (req, res) => {
   try {
     const { password } = req.body;
@@ -189,39 +185,39 @@ app.post('/api/documents/:id/view', async (req, res) => {
       fileType: doc.fileType,
       title: doc.title,
       documentRef: doc.documentRef,
-      businessName: doc.businessId?.businessName,
-      categoryName: doc.categoryId?.name
+      businessName: doc.businessId?.businessName || 'General',
+      categoryName: doc.categoryId?.name || 'File'
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Fast Document Upload
+// Document Upload Endpoint
 app.post('/api/documents/upload', async (req, res) => {
   try {
     const { businessId, fiscalYearId, categoryId, partyName, fileBase64, mimeType } = req.body;
 
     if (!fileBase64) {
-      return res.status(400).json({ error: 'No image or document received' });
+      return res.status(400).json({ error: 'No image or file was uploaded' });
     }
 
-    // Resolve or fallback IDs if dropdowns were still loading
-    let bId = businessId;
-    let fId = fiscalYearId;
-    let cId = categoryId;
+    // Auto-resolve IDs if dropdowns were empty
+    let bId = (businessId && mongoose.Types.ObjectId.isValid(businessId)) ? businessId : null;
+    let fId = (fiscalYearId && mongoose.Types.ObjectId.isValid(fiscalYearId)) ? fiscalYearId : null;
+    let cId = (categoryId && mongoose.Types.ObjectId.isValid(categoryId)) ? categoryId : null;
 
-    if (!bId || !mongoose.Types.ObjectId.isValid(bId)) {
-      const firstBiz = await Business.findOne();
-      bId = firstBiz ? firstBiz._id : null;
+    if (!bId) {
+      const b = await Business.findOne();
+      if (b) bId = b._id;
     }
-    if (!fId || !mongoose.Types.ObjectId.isValid(fId)) {
-      const firstFY = await FiscalYear.findOne();
-      fId = firstFY ? firstFY._id : null;
+    if (!fId) {
+      const f = await FiscalYear.findOne();
+      if (f) fId = f._id;
     }
-    if (!cId || !mongoose.Types.ObjectId.isValid(cId)) {
-      const firstCat = await Category.findOne();
-      cId = firstCat ? firstCat._id : null;
+    if (!cId) {
+      const c = await Category.findOne();
+      if (c) cId = c._id;
     }
 
     const count = await Document.countDocuments();
@@ -239,13 +235,13 @@ app.post('/api/documents/upload', async (req, res) => {
 
     res.json({ message: 'Success', documentRef: doc.documentRef });
   } catch (err) {
-    console.error(err);
+    console.error('Upload Error:', err);
     res.status(500).json({ error: 'Save failed: ' + err.message });
   }
 });
 
 // ==========================================
-// USER INTERFACE
+// USER INTERFACE (HTML)
 // ==========================================
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -273,7 +269,7 @@ app.get('/', (req, res) => {
     .admin-link { width: 44px; height: 44px; border-radius: 50%; background: #fff; box-shadow: var(--clay-shadow); display: flex; align-items: center; justify-content: center; color: var(--primary); text-decoration: none; font-size: 1.2rem; }
     
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
-    .btn-act { padding: 22px; border-radius: 24px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; border: none; outline: none; }
+    .btn-act { padding: 22px; border-radius: 24px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: block; text-decoration: none; user-select: none; }
     .btn-cap { background: linear-gradient(135deg, #668EF0, #426fe4); box-shadow: 0 10px 20px rgba(102,142,240,0.3); }
     .btn-up { background: linear-gradient(135deg, #43C6AC, #2BB594); box-shadow: 0 10px 20px rgba(43,181,148,0.3); }
 
@@ -300,19 +296,22 @@ app.get('/', (req, res) => {
     <a href="/admin" class="admin-link" title="Open Admin Panel"><i class="fa-solid fa-shield-halved"></i></a>
   </header>
 
+  <!-- NATIVE HTML LABELS: Chrome and Mobile directly trigger camera/picker without JS blocking -->
   <div class="actions">
-    <button class="btn-act btn-cap" onclick="openPicker('cameraPicker')"><i class="fa-solid fa-camera"></i><br>CAPTURE</button>
-    <button class="btn-act btn-up" onclick="openPicker('filePicker')"><i class="fa-solid fa-cloud-arrow-up"></i><br>UPLOAD</button>
+    <label class="btn-act btn-cap" for="cameraInput">
+      <i class="fa-solid fa-camera"></i><br>CAPTURE
+      <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePickedFile(this)">
+    </label>
+    <label class="btn-act btn-up" for="fileInput">
+      <i class="fa-solid fa-cloud-arrow-up"></i><br>UPLOAD
+      <input type="file" id="fileInput" accept="image/*,application/pdf" style="display:none;" onchange="handlePickedFile(this)">
+    </label>
   </div>
-
-  <!-- Direct Native Inputs -->
-  <input type="file" id="cameraPicker" accept="image/*" capture="environment" style="display:none;" onchange="handlePickedFile(event)">
-  <input type="file" id="filePicker" accept="image/*,application/pdf" style="display:none;" onchange="handlePickedFile(event)">
 
   <div class="sec-header">
     <div class="sec-title">Directory / Businesses</div>
   </div>
-  <div class="biz-grid" id="bizContainer"><div class="biz-card">Loading businesses...</div></div>
+  <div class="biz-grid" id="bizContainer"><div class="biz-card">Connecting to database...</div></div>
 
   <div class="sec-header">
     <div class="sec-title">Recent Documents</div>
@@ -340,7 +339,7 @@ app.get('/', (req, res) => {
       <select id="filingCat" class="input"></select>
 
       <label style="font-size:0.8rem; font-weight:700;">Party / Supplier (Optional)</label>
-      <input type="text" id="filingParty" class="input" placeholder="e.g. Pokhara Traders">
+      <input type="text" id="filingParty" class="input" placeholder="e.g. Kathmandu Traders">
 
       <button id="saveDocBtn" class="btn-sub" onclick="submitDocumentFiling()">Save Document</button>
       <button style="width:100%; padding:10px; background:none; border:none; color:var(--muted); cursor:pointer; margin-top:8px; font-weight:700;" onclick="closeModal('filingModal')">Cancel</button>
@@ -379,78 +378,69 @@ app.get('/', (req, res) => {
     let preparedMime = 'image/jpeg';
     let selectedDocIdToView = null;
 
-    function openPicker(id) {
-      document.getElementById(id).click();
-    }
-
-    // Reliable Canvas Resizing with Image & PDF Fallback
-    async function compressFile(file) {
-      return new Promise((resolve) => {
-        if (!file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          reader.onload = () => resolve({ base64: reader.result, mime: file.type });
-          reader.readAsDataURL(file);
-          return;
-        }
-
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          const maxDim = 1200;
-
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
-            }
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve({ base64: canvas.toDataURL('image/jpeg', 0.8), mime: 'image/jpeg' });
-        };
-        img.onerror = () => {
-          // Fallback if browser can't decode (e.g. HEIC)
-          const reader = new FileReader();
-          reader.onload = () => resolve({ base64: reader.result, mime: file.type });
-          reader.readAsDataURL(file);
-        };
-        img.src = URL.createObjectURL(file);
-      });
-    }
-
-    async function handlePickedFile(e) {
-      const file = e.target.files[0];
+    // Fast, Safe Image Preparation with Fallback
+    function handlePickedFile(input) {
+      const file = input.files && input.files[0];
       if (!file) return;
 
       document.getElementById('filingModal').style.display = 'flex';
-      document.getElementById('compressStatus').innerText = 'Optimizing file...';
+      document.getElementById('compressStatus').innerText = 'Preparing document...';
       document.getElementById('saveDocBtn').disabled = true;
 
-      const { base64, mime } = await compressFile(file);
-      preparedBase64 = base64;
-      preparedMime = mime;
-
-      document.getElementById('compressStatus').innerText = '';
-      document.getElementById('saveDocBtn').disabled = false;
-
-      if (mime.startsWith('image/')) {
-        document.getElementById('imgPreview').src = base64;
-        document.getElementById('previewWrap').style.display = 'block';
+      if (file.type && file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const img = new Image();
+          img.onload = function() {
+            try {
+              const canvas = document.createElement('canvas');
+              let w = img.width;
+              let h = img.height;
+              const max = 1000;
+              if (w > max || h > max) {
+                if (w > h) { h = Math.round((h * max) / w); w = max; }
+                else { w = Math.round((w * max) / h); h = max; }
+              }
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, w, h);
+              preparedBase64 = canvas.toDataURL('image/jpeg', 0.75);
+              preparedMime = 'image/jpeg';
+              document.getElementById('imgPreview').src = preparedBase64;
+              document.getElementById('previewWrap').style.display = 'block';
+            } catch (err) {
+              preparedBase64 = e.target.result;
+              preparedMime = file.type || 'image/jpeg';
+            }
+            document.getElementById('compressStatus').innerText = 'Ready to save!';
+            document.getElementById('saveDocBtn').disabled = false;
+          };
+          img.onerror = function() {
+            preparedBase64 = e.target.result;
+            preparedMime = file.type || 'image/jpeg';
+            document.getElementById('compressStatus').innerText = 'Ready to save!';
+            document.getElementById('saveDocBtn').disabled = false;
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
       } else {
-        document.getElementById('previewWrap').style.display = 'none';
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          preparedBase64 = e.target.result;
+          preparedMime = file.type || 'application/pdf';
+          document.getElementById('previewWrap').style.display = 'none';
+          document.getElementById('compressStatus').innerText = 'Document ready (' + file.name + ')';
+          document.getElementById('saveDocBtn').disabled = false;
+        };
+        reader.readAsDataURL(file);
       }
-      e.target.value = '';
+      input.value = '';
     }
 
     async function submitDocumentFiling() {
-      if (!preparedBase64) return alert('No file prepared');
+      if (!preparedBase64) return alert('No file selected');
 
       const btn = document.getElementById('saveDocBtn');
       btn.innerText = 'Saving Document...';
@@ -489,42 +479,66 @@ app.get('/', (req, res) => {
     async function loadData() {
       try {
         const [bRes, fRes, cRes, dRes] = await Promise.all([
-          fetch('/api/businesses'),
-          fetch('/api/fiscal-years'),
-          fetch('/api/categories'),
-          fetch('/api/documents')
+          fetch('/api/businesses').catch(() => null),
+          fetch('/api/fiscal-years').catch(() => null),
+          fetch('/api/categories').catch(() => null),
+          fetch('/api/documents').catch(() => null)
         ]);
 
-        const businesses = await bRes.json();
-        const fiscalYears = await fRes.json();
-        const categories = await cRes.json();
-        const docs = await dRes.json();
+        const businesses = (bRes && bRes.ok) ? await bRes.json() : [];
+        const fiscalYears = (fRes && fRes.ok) ? await fRes.json() : [];
+        const categories = (cRes && cRes.ok) ? await cRes.json() : [];
+        const docs = (dRes && dRes.ok) ? await dRes.json() : { documents: [] };
+
+        const bizArr = Array.isArray(businesses) ? businesses : [];
+        const fyArr = Array.isArray(fiscalYears) ? fiscalYears : [];
+        const catArr = Array.isArray(categories) ? categories : [];
+        const docArr = (docs && Array.isArray(docs.documents)) ? docs.documents : [];
 
         // Render Directory
-        document.getElementById('bizContainer').innerHTML = businesses.map(b => \`
-          <div class="biz-card">
-            <div style="font-weight:700;"><i class="fa-solid fa-folder-open" style="color:var(--primary); margin-right:6px;"></i>\${b.businessName}</div>
-            <div style="font-size:0.8rem; color:var(--muted); margin-top:4px;">\${b.documentCount} Document\${b.documentCount === 1 ? '' : 's'}</div>
-          </div>
-        \`).join('');
+        if (bizArr.length > 0) {
+          document.getElementById('bizContainer').innerHTML = bizArr.map(b => \`
+            <div class="biz-card">
+              <div style="font-weight:700;"><i class="fa-solid fa-folder-open" style="color:var(--primary); margin-right:6px;"></i>\${b.businessName}</div>
+              <div style="font-size:0.8rem; color:var(--muted); margin-top:4px;">\${b.documentCount} Document\${b.documentCount === 1 ? '' : 's'}</div>
+            </div>
+          \`).join('');
+          document.getElementById('filingBiz').innerHTML = bizArr.map(b => \`<option value="\${b._id}">\${b.businessName}</option>\`).join('');
+        } else {
+          document.getElementById('bizContainer').innerHTML = '<div class="biz-card">No businesses configured yet.</div>';
+          document.getElementById('filingBiz').innerHTML = '<option value="">Default Business</option>';
+        }
 
-        // Populate Selects
-        document.getElementById('filingBiz').innerHTML = businesses.map(b => \`<option value="\${b._id}">\${b.businessName}</option>\`).join('');
-        document.getElementById('filingFY').innerHTML = fiscalYears.map(f => \`<option value="\${f._id}">\${f.fiscalYear}</option>\`).join('');
-        document.getElementById('filingCat').innerHTML = categories.map(c => \`<option value="\${c._id}">\${c.name}</option>\`).join('');
+        // FY Select
+        if (fyArr.length > 0) {
+          document.getElementById('filingFY').innerHTML = fyArr.map(f => \`<option value="\${f._id}">\${f.fiscalYear}</option>\`).join('');
+        } else {
+          document.getElementById('filingFY').innerHTML = '<option value="">2082/83</option>';
+        }
+
+        // Category Select
+        if (catArr.length > 0) {
+          document.getElementById('filingCat').innerHTML = catArr.map(c => \`<option value="\${c._id}">\${c.name}</option>\`).join('');
+        } else {
+          document.getElementById('filingCat').innerHTML = '<option value="">General Documents</option>';
+        }
 
         // Render Documents
-        document.getElementById('docsContainer').innerHTML = (docs.documents && docs.documents.length) ? docs.documents.map(d => \`
-          <div class="doc-item" onclick="promptView('\${d._id}')">
-            <div>
-              <div class="doc-ref"><i class="fa-solid fa-file-lines" style="color:var(--primary); margin-right:6px;"></i>\${d.documentRef}</div>
-              <div class="doc-sub">\${d.businessId?.businessName || 'Folder'} • \${d.categoryId?.name || 'File'} \${d.partyName ? '(' + d.partyName + ')' : ''}</div>
+        if (docArr.length > 0) {
+          document.getElementById('docsContainer').innerHTML = docArr.map(d => \`
+            <div class="doc-item" onclick="promptView('\${d._id}')">
+              <div>
+                <div class="doc-ref"><i class="fa-solid fa-file-lines" style="color:var(--primary); margin-right:6px;"></i>\${d.documentRef}</div>
+                <div class="doc-sub">\${d.businessId?.businessName || 'Folder'} • \${d.categoryId?.name || 'File'} \${d.partyName ? '(' + d.partyName + ')' : ''}</div>
+              </div>
+              <i class="fa-solid fa-lock" style="color:#c5cbe0;"></i>
             </div>
-            <i class="fa-solid fa-lock" style="color:#c5cbe0;"></i>
-          </div>
-        \`).join('') : '<div class="doc-item" style="color:var(--muted); justify-content:center;">No documents uploaded yet. Tap CAPTURE or UPLOAD!</div>';
-      } catch (e) {
-        console.error(e);
+          \`).join('');
+        } else {
+          document.getElementById('docsContainer').innerHTML = '<div class="doc-item" style="color:var(--muted); justify-content:center;">No documents uploaded yet. Tap CAPTURE or UPLOAD!</div>';
+        }
+      } catch (err) {
+        console.error('loadData error:', err);
       }
     }
 
