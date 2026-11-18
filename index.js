@@ -295,12 +295,40 @@ app.get('/', (req, res) => {
     .brand { font-size: 1.4rem; font-weight: 800; color: #668EF0; display: flex; align-items: center; gap: 8px; }
     .icon-bubble { width: 42px; height: 42px; border-radius: 50%; background: #fff; box-shadow: var(--clay-shadow); display: flex; align-items: center; justify-content: center; color: #668EF0; text-decoration: none; font-size: 1.15rem; cursor: pointer; }
 
-    /* Action Buttons */
+    /* Action Buttons & Label hack */
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 20px; }
-    .btn-act { padding: 22px; border-radius: 26px; color: #fff; text-align: center; cursor: pointer; font-weight: 800; font-size: 1.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; user-select: none; border:none; outline:none; }
+    
+    .btn-act { 
+      padding: 22px; 
+      border-radius: 26px; 
+      color: #fff; 
+      text-align: center; 
+      cursor: pointer; 
+      font-weight: 800; 
+      font-size: 1.15rem; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      justify-content: center; 
+      gap: 8px; 
+      user-select: none; 
+      border: none; 
+      outline: none; 
+    }
+    
     .btn-cap { background: linear-gradient(135deg, #668EF0, #426fe4); box-shadow: 0 10px 20px rgba(102,142,240,0.3); }
     .btn-up { background: linear-gradient(135deg, #43C6AC, #2BB594); box-shadow: 0 10px 20px rgba(43,181,148,0.3); }
     .btn-act span.sub { font-size: 0.78rem; font-weight: 500; opacity: 0.9; }
+
+    /* Invisible file inputs covering the labels */
+    .file-input-hidden {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%; height: 100%;
+      opacity: 0;
+      cursor: pointer;
+      z-index: 10;
+    }
 
     .sec-header { display: flex; justify-content: space-between; align-items: center; margin: 24px 24px 10px; }
     .sec-title { font-weight: 800; font-size: 1.1rem; }
@@ -321,7 +349,7 @@ app.get('/', (req, res) => {
     .btn-primary { width:100%; padding:15px; background:#007aff; color:#fff; border:none; border-radius:14px; font-weight:800; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; gap:8px; }
     .btn-secondary { width:100%; padding:13px; background:#f1f5f9; color:var(--text); border:none; border-radius:14px; font-weight:700; cursor:pointer; font-size:0.95rem; margin-top:8px; }
 
-    /* WHATSAPP-STYLE MEDIA PREVIEW (Matches Screenshot) */
+    /* WHATSAPP-STYLE MEDIA PREVIEW */
     #whatsappPreviewModal { display:none; position:fixed; inset:0; background:#0b141a; z-index:10001; flex-direction:column; justify-content:space-between; }
     .wa-top-bar { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; background:rgba(11,20,26,0.95); color:#e9edef; }
     .wa-top-left { display:flex; align-items:center; gap:12px; font-weight:700; font-size:1.1rem; }
@@ -375,16 +403,22 @@ app.get('/', (req, res) => {
 
   <!-- ACTIONS -->
   <div class="actions">
-    <button type="button" class="btn-act btn-cap" onclick="openPicker('camera')">
+    <!-- CAPTURE BUTTON (Label wrapper ensures native input click) -->
+    <label class="btn-act btn-cap" style="position: relative;">
       <i class="fa-solid fa-camera" style="font-size:1.8rem;"></i>
       <span>CAPTURE</span>
       <span class="sub">Take Photo Voucher</span>
-    </button>
-    <button type="button" class="btn-act btn-up" onclick="openPicker('file')">
+      <!-- capture="environment" opens the rear camera on mobile, file chooser on PC -->
+      <input type="file" id="directCamInput" class="file-input-hidden" accept="image/*" capture="environment" onchange="handleIncomingFile(this)">
+    </label>
+
+    <!-- UPLOAD BUTTON (Label wrapper ensures native input click) -->
+    <label class="btn-act btn-up" style="position: relative;">
       <i class="fa-solid fa-cloud-arrow-up" style="font-size:1.8rem;"></i>
       <span>UPLOAD</span>
       <span class="sub">Gallery & PDFs</span>
-    </button>
+      <input type="file" id="directUploadInput" class="file-input-hidden" accept="image/*,application/pdf" onchange="handleIncomingFile(this)">
+    </label>
   </div>
 
   <!-- DIRECTORY SECTION -->
@@ -513,12 +547,6 @@ app.get('/', (req, res) => {
     </div>
   </div>
 
-  <!-- Direct Native Inputs -->
-  <!-- CAPTURE: capture="environment" opens rear camera on mobile, file chooser on PC -->
-  <input type="file" id="directCamInput" accept="image/*" capture="environment" style="display:none;" onchange="handleIncomingFile(this)">
-  <!-- UPLOAD: no capture attribute, opens gallery/file picker (images + PDFs) on all devices -->
-  <input type="file" id="directUploadInput" accept="image/*,application/pdf" style="display:none;" onchange="handleIncomingFile(this)">
-
   <script>
     let currentRawBase64 = null;
     let processedBase64 = null;
@@ -529,13 +557,6 @@ app.get('/', (req, res) => {
     let activeFilter = 'original';
     let latestUploadedDocId = null;
     let selectedDocIdToView = null;
-
-    function openPicker(type) {
-      const el = document.getElementById(type === 'camera' ? 'directCamInput' : 'directUploadInput');
-      if (!el) return;
-      el.value = ''; // allow re-selecting the same file
-      el.click();
-    }
 
     function showToast(msg, type) {
       const toast = document.getElementById('statusToast');
@@ -577,6 +598,8 @@ app.get('/', (req, res) => {
         openWhatsappPreview();
       };
       reader.readAsDataURL(file);
+      
+      // Reset input value so you can pick the same file again later
       input.value = '';
     }
 
